@@ -8,7 +8,10 @@ interface LocationSelectorProps {
   onLocationChange: (location: Location) => void;
 }
 
-export function LocationSelector({ selectedLocation, onLocationChange }: LocationSelectorProps) {
+export function LocationSelector({
+  selectedLocation,
+  onLocationChange,
+}: LocationSelectorProps) {
   const locations: { value: Location; label: string; color: string }[] = [
     { value: "santas", label: "Santas Indoor", color: "bg-primary" },
     { value: "outdoor", label: "Outdoor", color: "bg-accent" },

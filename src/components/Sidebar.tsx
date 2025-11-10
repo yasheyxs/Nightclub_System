@@ -15,13 +15,11 @@ import { cn } from "@/lib/utils";
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
   { name: "Entradas", href: "/entradas", icon: Ticket },
-  { name: "Stock", href: "/stock", icon: Package },
   { name: "Eventos", href: "/eventos", icon: Calendar },
   { name: "Promotores", href: "/promotores", icon: Users },
   { name: "Usuarios", href: "/usuarios", icon: UserPlus },
-  { name: "Ventas", href: "/ventas", icon: ShoppingCart },
   { name: "Reportes", href: "/reportes", icon: BarChart3 },
-  { name: "Configuración", href: "/configuracion", icon: Settings },
+  { name: "Configuración entradas", href: "/configuracion", icon: Settings },
 ];
 
 export function Sidebar() {

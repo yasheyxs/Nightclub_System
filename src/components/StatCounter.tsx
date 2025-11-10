@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Minus, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useMemo } from "react";
 
 interface StatCounterProps {
   title: string;
@@ -27,24 +28,50 @@ export function StatCounter({
     success: "border-success/50 bg-success/5",
   };
 
-  const percentage = maxCount ? Math.round((count / maxCount) * 100) : 0;
+  // 🧠 Aseguramos que count y maxCount sean números válidos
+  const safeCount = Number.isFinite(count) ? count : 0;
+  const safeMax = Number.isFinite(maxCount ?? 0) ? (maxCount ?? 0) : 0;
+
+  const formatter = useMemo(
+    () => new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }),
+    []
+  );
+
+  const formattedCount = formatter.format(safeCount);
+  const formattedMax = safeMax ? formatter.format(safeMax) : null;
+
+  // 🔹 Evita divisiones por 0 → si no hay maxCount, el porcentaje es 0
+  const percentage =
+    safeMax > 0 ? Math.min(Math.round((safeCount / safeMax) * 100), 100) : 0;
+
   const isNearCapacity = percentage >= 80;
 
   return (
     <Card className={cn("transition-all duration-300", variantStyles[variant])}>
       <CardHeader>
-        <CardTitle className="text-lg font-semibold text-foreground">{title}</CardTitle>
+        <CardTitle className="text-lg font-semibold text-foreground">
+          {title}
+        </CardTitle>
       </CardHeader>
+
       <CardContent className="space-y-4">
         <div className="text-center">
-          <div className="text-6xl font-bold text-primary mb-2">{count}</div>
-          {maxCount && (
+          {/* ✅ Nunca NaN */}
+          <div className="text-6xl font-bold text-primary mb-2 leading-none">
+            {formattedCount}
+          </div>
+
+          {safeMax > 0 && (
             <div className="flex items-center justify-center gap-2">
-              <div className="text-sm text-muted-foreground">de {maxCount}</div>
+              <div className="text-sm text-muted-foreground">
+                de {formattedMax}
+              </div>
               <div
                 className={cn(
-                  "text-sm font-semibold px-2 py-1 rounded",
-                  isNearCapacity ? "bg-warning/20 text-warning" : "bg-success/20 text-success"
+                  "text-sm font-semibold px-2 py-1 rounded transition-colors",
+                  isNearCapacity
+                    ? "bg-warning/20 text-warning"
+                    : "bg-success/20 text-success"
                 )}
               >
                 {percentage}%
@@ -52,19 +79,22 @@ export function StatCounter({
             </div>
           )}
         </div>
-        <div className="flex gap-3">
+
+        {/* BOTONES */}
+        <div className="flex gap-3 mt-4">
           <Button
             onClick={onDecrement}
-            disabled={count <= 0}
+            disabled={safeCount <= 0}
             size="lg"
             variant="outline"
             className="flex-1 h-16 text-xl font-bold"
           >
             <Minus className="h-8 w-8" />
           </Button>
+
           <Button
             onClick={onIncrement}
-            disabled={maxCount ? count >= maxCount : false}
+            disabled={safeMax ? safeCount >= safeMax : false}
             size="lg"
             className="flex-1 h-16 text-xl font-bold bg-gradient-primary hover:opacity-90"
           >
