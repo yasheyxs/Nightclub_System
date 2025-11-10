@@ -2,217 +2,235 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { ShoppingCart, DollarSign, CreditCard, Banknote, Plus, Minus } from "lucide-react";
-import { toast } from "sonner";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { ShoppingCart, Plus, DollarSign, TrendingUp } from "lucide-react";
+import { toast } from "@/hooks/use-toast";
 
-const productos = [
-  { id: 1, nombre: "Cerveza Nacional", precio: 45, categoria: "Bebidas" },
-  { id: 2, nombre: "Cerveza Importada", precio: 75, categoria: "Bebidas" },
-  { id: 3, nombre: "Vodka Shot", precio: 65, categoria: "Bebidas" },
-  { id: 4, nombre: "Tequila Shot", precio: 70, categoria: "Bebidas" },
-  { id: 5, nombre: "Whisky Shot", precio: 120, categoria: "Premium" },
-  { id: 6, nombre: "Cocktail Especial", precio: 150, categoria: "Premium" },
-  { id: 7, nombre: "Botella Vodka", precio: 1800, categoria: "Botellas" },
-  { id: 8, nombre: "Botella Tequila", precio: 2200, categoria: "Botellas" },
-  { id: 9, nombre: "Entrada General", precio: 250, categoria: "Entradas" },
-  { id: 10, nombre: "Entrada VIP", precio: 500, categoria: "Entradas" },
-];
-
-interface CarritoItem {
-  producto: typeof productos[0];
-  cantidad: number;
+interface Sale {
+  id: string;
+  product: string;
+  quantity: number;
+  price: number;
+  total: number;
+  bar: string;
+  timestamp: string;
 }
 
-const Ventas = () => {
-  const [carrito, setCarrito] = useState<CarritoItem[]>([]);
-  const [metodoPago, setMetodoPago] = useState<"efectivo" | "tarjeta" | null>(null);
+export default function Ventas() {
+  const [sales, setSales] = useState<Sale[]>([
+    {
+      id: "1",
+      product: "Fernet Branca",
+      quantity: 2,
+      price: 4500,
+      total: 9000,
+      bar: "Barra Principal",
+      timestamp: new Date().toLocaleString("es-AR"),
+    },
+    {
+      id: "2",
+      product: "Cerveza Corona",
+      quantity: 5,
+      price: 3500,
+      total: 17500,
+      bar: "Barra Exterior",
+      timestamp: new Date().toLocaleString("es-AR"),
+    },
+  ]);
 
-  const agregarAlCarrito = (producto: typeof productos[0]) => {
-    const itemExistente = carrito.find(item => item.producto.id === producto.id);
-    
-    if (itemExistente) {
-      setCarrito(carrito.map(item =>
-        item.producto.id === producto.id
-          ? { ...item, cantidad: item.cantidad + 1 }
-          : item
-      ));
-    } else {
-      setCarrito([...carrito, { producto, cantidad: 1 }]);
-    }
-    
-    toast.success(`${producto.nombre} agregado al carrito`);
-  };
+  const [open, setOpen] = useState(false);
+  const [newSale, setNewSale] = useState({
+    product: "",
+    quantity: "",
+    price: "",
+    bar: "",
+  });
 
-  const modificarCantidad = (id: number, delta: number) => {
-    setCarrito(carrito.map(item =>
-      item.producto.id === id
-        ? { ...item, cantidad: Math.max(0, item.cantidad + delta) }
-        : item
-    ).filter(item => item.cantidad > 0));
-  };
-
-  const subtotal = carrito.reduce((acc, item) => acc + (item.producto.precio * item.cantidad), 0);
-  const iva = subtotal * 0.16;
-  const total = subtotal + iva;
-
-  const procesarVenta = () => {
-    if (carrito.length === 0) {
-      toast.error("El carrito está vacío");
-      return;
-    }
-    
-    if (!metodoPago) {
-      toast.error("Selecciona un método de pago");
+  const handleAddSale = () => {
+    if (!newSale.product || !newSale.quantity || !newSale.price || !newSale.bar) {
+      toast({
+        title: "Error",
+        description: "Por favor completa todos los campos",
+        variant: "destructive",
+      });
       return;
     }
 
-    toast.success(`Venta procesada: $${total.toFixed(2)} - ${metodoPago}`);
-    setCarrito([]);
-    setMetodoPago(null);
+    const sale: Sale = {
+      id: String(sales.length + 1),
+      product: newSale.product,
+      quantity: parseInt(newSale.quantity),
+      price: parseFloat(newSale.price),
+      total: parseInt(newSale.quantity) * parseFloat(newSale.price),
+      bar: newSale.bar,
+      timestamp: new Date().toLocaleString("es-AR"),
+    };
+
+    setSales([sale, ...sales]);
+    setOpen(false);
+    setNewSale({ product: "", quantity: "", price: "", bar: "" });
+    
+    toast({
+      title: "Venta registrada",
+      description: "La venta se agregó correctamente",
+    });
   };
 
-  const categorias = [...new Set(productos.map(p => p.categoria))];
+  const totalSales = sales.reduce((sum, sale) => sum + sale.total, 0);
+  const totalProducts = sales.reduce((sum, sale) => sum + sale.quantity, 0);
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <div>
-        <h2 className="text-3xl font-bold text-foreground mb-2">Punto de Venta</h2>
-        <p className="text-muted-foreground">Sistema POS rápido</p>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h1 className="text-4xl font-bold text-foreground mb-2">Ventas en Barras</h1>
+          <p className="text-muted-foreground">Registro de ventas en tiempo real</p>
+        </div>
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogTrigger asChild>
+            <Button size="lg" className="gap-2">
+              <Plus className="h-5 w-5" />
+              <span className="hidden lg:inline">Registrar Venta</span>
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="text-2xl">Registrar Nueva Venta</DialogTitle>
+            </DialogHeader>
+            <div className="grid gap-6 py-4">
+              <div className="grid gap-3">
+                <Label htmlFor="product" className="text-base">Producto</Label>
+                <Input
+                  id="product"
+                  value={newSale.product}
+                  onChange={(e) => setNewSale({ ...newSale, product: e.target.value })}
+                  placeholder="Ej: Fernet Branca"
+                  className="h-12 text-base"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-3">
+                  <Label htmlFor="quantity" className="text-base">Cantidad</Label>
+                  <Input
+                    id="quantity"
+                    type="number"
+                    value={newSale.quantity}
+                    onChange={(e) => setNewSale({ ...newSale, quantity: e.target.value })}
+                    placeholder="Ej: 2"
+                    className="h-12 text-base"
+                  />
+                </div>
+                <div className="grid gap-3">
+                  <Label htmlFor="price" className="text-base">Precio Unitario ($)</Label>
+                  <Input
+                    id="price"
+                    type="number"
+                    value={newSale.price}
+                    onChange={(e) => setNewSale({ ...newSale, price: e.target.value })}
+                    placeholder="Ej: 4500"
+                    className="h-12 text-base"
+                  />
+                </div>
+              </div>
+              <div className="grid gap-3">
+                <Label htmlFor="bar" className="text-base">Barra</Label>
+                <Select value={newSale.bar} onValueChange={(value) => setNewSale({ ...newSale, bar: value })}>
+                  <SelectTrigger className="h-12 text-base">
+                    <SelectValue placeholder="Seleccionar barra" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Barra Principal">Barra Principal</SelectItem>
+                    <SelectItem value="Barra Exterior">Barra Exterior</SelectItem>
+                    <SelectItem value="Barra VIP">Barra VIP</SelectItem>
+                    <SelectItem value="Barra Kiddo">Barra Kiddo</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="flex gap-3 justify-end">
+              <Button variant="outline" size="lg" onClick={() => setOpen(false)}>
+                Cancelar
+              </Button>
+              <Button size="lg" onClick={handleAddSale}>
+                Registrar
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Productos */}
-        <Card className="lg:col-span-2 bg-gradient-card border-border/50 shadow-card">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-foreground">
-              <ShoppingCart className="w-5 h-5 text-primary" />
-              Productos
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card className="border-primary/50 bg-primary/5">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm text-muted-foreground flex items-center gap-2">
+              <DollarSign className="h-4 w-4 text-primary" />
+              Total Recaudado
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {categorias.map(categoria => (
-              <div key={categoria} className="mb-6">
-                <h3 className="text-lg font-semibold text-foreground mb-3 flex items-center gap-2">
-                  <div className="w-1 h-6 bg-gradient-primary rounded"></div>
-                  {categoria}
-                </h3>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                  {productos.filter(p => p.categoria === categoria).map(producto => (
-                    <Button
-                      key={producto.id}
-                      onClick={() => agregarAlCarrito(producto)}
-                      variant="outline"
-                      className="h-auto p-4 flex flex-col items-start gap-2 hover:bg-primary/10 hover:border-primary transition-all"
-                    >
-                      <span className="font-semibold text-foreground">{producto.nombre}</span>
-                      <span className="text-xl font-bold text-primary">${producto.precio}</span>
-                    </Button>
-                  ))}
-                </div>
-              </div>
-            ))}
+            <div className="text-3xl font-bold text-primary">${totalSales.toLocaleString()}</div>
           </CardContent>
         </Card>
 
-        {/* Carrito */}
-        <Card className="bg-gradient-card border-border/50 shadow-card">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-foreground">
-              <ShoppingCart className="w-5 h-5 text-accent" />
-              Carrito
+        <Card className="border-accent/50 bg-accent/5">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm text-muted-foreground flex items-center gap-2">
+              <ShoppingCart className="h-4 w-4 text-accent" />
+              Productos Vendidos
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            {carrito.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                <ShoppingCart className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                <p>Carrito vacío</p>
-              </div>
-            ) : (
-              <>
-                <div className="space-y-2 max-h-60 overflow-y-auto">
-                  {carrito.map((item) => (
-                    <div key={item.producto.id} className="flex items-center justify-between p-3 bg-surface-elevated rounded-lg">
-                      <div className="flex-1">
-                        <p className="font-medium text-foreground text-sm">{item.producto.nombre}</p>
-                        <p className="text-xs text-primary font-bold">${item.producto.precio}</p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-7 w-7"
-                          onClick={() => modificarCantidad(item.producto.id, -1)}
-                        >
-                          <Minus className="w-3 h-3" />
-                        </Button>
-                        <span className="w-8 text-center font-bold text-foreground">{item.cantidad}</span>
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-7 w-7"
-                          onClick={() => modificarCantidad(item.producto.id, 1)}
-                        >
-                          <Plus className="w-3 h-3" />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+          <CardContent>
+            <div className="text-3xl font-bold text-accent">{totalProducts}</div>
+          </CardContent>
+        </Card>
 
-                <div className="space-y-2 pt-4 border-t border-border">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Subtotal</span>
-                    <span className="font-medium text-foreground">${subtotal.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">IVA (16%)</span>
-                    <span className="font-medium text-foreground">${iva.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between text-lg font-bold pt-2 border-t border-border">
-                    <span className="text-foreground">Total</span>
-                    <span className="text-primary">${total.toFixed(2)}</span>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <p className="text-sm font-medium text-foreground">Método de pago</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button
-                      variant={metodoPago === "efectivo" ? "default" : "outline"}
-                      className={metodoPago === "efectivo" ? "bg-gradient-primary shadow-neon" : ""}
-                      onClick={() => setMetodoPago("efectivo")}
-                    >
-                      <Banknote className="w-4 h-4 mr-2" />
-                      Efectivo
-                    </Button>
-                    <Button
-                      variant={metodoPago === "tarjeta" ? "default" : "outline"}
-                      className={metodoPago === "tarjeta" ? "bg-gradient-primary shadow-neon" : ""}
-                      onClick={() => setMetodoPago("tarjeta")}
-                    >
-                      <CreditCard className="w-4 h-4 mr-2" />
-                      Tarjeta
-                    </Button>
-                  </div>
-                </div>
-
-                <Button
-                  onClick={procesarVenta}
-                  className="w-full bg-gradient-primary shadow-neon hover:shadow-neon-intense transition-all"
-                  size="lg"
-                >
-                  <DollarSign className="w-5 h-5 mr-2" />
-                  Procesar Venta
-                </Button>
-              </>
-            )}
+        <Card className="border-success/50 bg-success/5">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm text-muted-foreground flex items-center gap-2">
+              <TrendingUp className="h-4 w-4 text-success" />
+              Ventas Registradas
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-success">{sales.length}</div>
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Historial de Ventas</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-base">Producto</TableHead>
+                <TableHead className="text-base">Cantidad</TableHead>
+                <TableHead className="text-base">Precio Unit.</TableHead>
+                <TableHead className="text-base">Total</TableHead>
+                <TableHead className="text-base">Barra</TableHead>
+                <TableHead className="text-base">Fecha/Hora</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {sales.map((sale) => (
+                <TableRow key={sale.id}>
+                  <TableCell className="font-medium text-base">{sale.product}</TableCell>
+                  <TableCell className="text-base">{sale.quantity}</TableCell>
+                  <TableCell className="text-base">${sale.price.toLocaleString()}</TableCell>
+                  <TableCell className="text-base font-bold text-primary">${sale.total.toLocaleString()}</TableCell>
+                  <TableCell className="text-base text-accent">{sale.bar}</TableCell>
+                  <TableCell className="text-base text-muted-foreground">{sale.timestamp}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
     </div>
   );
-};
-
-export default Ventas;
+}

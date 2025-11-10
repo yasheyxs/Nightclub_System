@@ -8,65 +8,71 @@ All colors MUST be HSL.
 
 @layer base {
   :root {
-    --background: 240 10% 5%;
-    --foreground: 0 0% 93%;
+    /* Nightclub theme - Dark base with neon accents */
+    --background: 240 10% 8%;
+    --foreground: 0 0% 98%;
 
-    --card: 245 15% 13%;
-    --card-foreground: 0 0% 93%;
+    --card: 240 8% 12%;
+    --card-foreground: 0 0% 98%;
 
-    --popover: 245 15% 10%;
-    --popover-foreground: 0 0% 93%;
+    --popover: 240 10% 10%;
+    --popover-foreground: 0 0% 98%;
 
-    --primary: 245 100% 69%;
+    /* Neon purple primary */
+    --primary: 270 80% 60%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 245 15% 13%;
-    --secondary-foreground: 0 0% 93%;
+    /* Dark secondary with slight purple tint */
+    --secondary: 260 15% 20%;
+    --secondary-foreground: 0 0% 98%;
 
-    --muted: 245 10% 20%;
-    --muted-foreground: 0 0% 65%;
+    --muted: 240 8% 18%;
+    --muted-foreground: 240 5% 60%;
 
-    --accent: 300 100% 50%;
-    --accent-foreground: 0 0% 100%;
+    /* Golden accent */
+    --accent: 45 100% 60%;
+    --accent-foreground: 240 10% 8%;
 
-    --destructive: 0 70% 60%;
+    /* Neon red for alerts */
+    --destructive: 0 85% 60%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 245 15% 18%;
-    --input: 245 15% 18%;
-    --ring: 245 100% 69%;
+    /* Success green neon */
+    --success: 140 80% 50%;
+    --success-foreground: 0 0% 100%;
+
+    /* Warning orange */
+    --warning: 30 100% 55%;
+    --warning-foreground: 0 0% 100%;
+
+    --border: 240 8% 20%;
+    --input: 240 8% 18%;
+    --ring: 270 80% 60%;
 
     --radius: 0.75rem;
 
-    --sidebar-background: 245 20% 8%;
-    --sidebar-foreground: 0 0% 93%;
-    --sidebar-primary: 245 100% 69%;
+    /* Sidebar dark theme */
+    --sidebar-background: 240 12% 6%;
+    --sidebar-foreground: 0 0% 95%;
+    --sidebar-primary: 270 80% 60%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 245 15% 13%;
-    --sidebar-accent-foreground: 0 0% 93%;
-    --sidebar-border: 245 15% 15%;
-    --sidebar-ring: 245 100% 69%;
+    --sidebar-accent: 260 15% 15%;
+    --sidebar-accent-foreground: 0 0% 98%;
+    --sidebar-border: 240 8% 15%;
+    --sidebar-ring: 270 80% 60%;
 
-    /* Custom design tokens */
-    --neon-glow: 245 100% 69%;
-    --neon-pink: 300 100% 50%;
-    --surface-darker: 245 20% 8%;
-    --surface-elevated: 245 15% 15%;
-    
-    /* Gradients */
-    --gradient-primary: linear-gradient(135deg, hsl(245 100% 69%) 0%, hsl(300 100% 50%) 100%);
-    --gradient-card: linear-gradient(145deg, hsl(245 15% 13%) 0%, hsl(245 20% 10%) 100%);
-    --gradient-glow: radial-gradient(circle at 50% 0%, hsl(245 100% 69% / 0.15) 0%, transparent 70%);
-    
-    /* Shadows */
-    --shadow-neon: 0 0 30px hsl(245 100% 69% / 0.3);
-    --shadow-neon-intense: 0 0 40px hsl(245 100% 69% / 0.5), 0 0 80px hsl(245 100% 69% / 0.2);
-    --shadow-pink: 0 0 30px hsl(300 100% 50% / 0.3);
-    --shadow-card: 0 10px 40px hsl(240 10% 5% / 0.5);
-    
-    /* Animations */
+    /* Custom gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(270, 80%, 60%), hsl(280, 70%, 50%));
+    --gradient-accent: linear-gradient(135deg, hsl(45, 100%, 60%), hsl(35, 100%, 55%));
+    --gradient-dark: linear-gradient(180deg, hsl(240, 10%, 8%), hsl(240, 12%, 6%));
+
+    /* Glow effects */
+    --glow-primary: 0 0 20px hsl(270, 80%, 60% / 0.5);
+    --glow-accent: 0 0 20px hsl(45, 100%, 60% / 0.4);
+    --glow-success: 0 0 20px hsl(140, 80%, 50% / 0.4);
+
+    /* Smooth transitions */
     --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    --transition-bounce: all 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
   }
 }
 

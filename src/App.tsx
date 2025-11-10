@@ -3,16 +3,15 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { MainLayout } from "./components/MainLayout";
-import Dashboard from "./pages/Dashboard";
-import Clientes from "./pages/Clientes";
+import { Layout } from "@/components/Layout";
+import Index from "./pages/Index";
+import Entradas from "./pages/Entradas";
+import Stock from "./pages/Stock";
 import Eventos from "./pages/Eventos";
-import Ventas from "./pages/Ventas";
-import Inventario from "./pages/Inventario";
-import Personal from "./pages/Personal";
-import Marketing from "./pages/Marketing";
+import Promotores from "./pages/Promotores";
 import Reportes from "./pages/Reportes";
-import Auth from "./pages/Auth";
+import Configuracion from "./pages/Configuracion";
+import Ventas from "./pages/Ventas";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -23,18 +22,20 @@ const App = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter>
-        <Routes>
-          <Route path="/auth" element={<Auth />} />
-          <Route path="/" element={<MainLayout><Dashboard /></MainLayout>} />
-          <Route path="/clientes" element={<MainLayout><Clientes /></MainLayout>} />
-          <Route path="/eventos" element={<MainLayout><Eventos /></MainLayout>} />
-          <Route path="/ventas" element={<MainLayout><Ventas /></MainLayout>} />
-          <Route path="/inventario" element={<MainLayout><Inventario /></MainLayout>} />
-          <Route path="/personal" element={<MainLayout><Personal /></MainLayout>} />
-          <Route path="/marketing" element={<MainLayout><Marketing /></MainLayout>} />
-          <Route path="/reportes" element={<MainLayout><Reportes /></MainLayout>} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
+        <Layout>
+          <Routes>
+            <Route path="/" element={<Index />} />
+            <Route path="/entradas" element={<Entradas />} />
+            <Route path="/stock" element={<Stock />} />
+            <Route path="/eventos" element={<Eventos />} />
+            <Route path="/promotores" element={<Promotores />} />
+            <Route path="/reportes" element={<Reportes />} />
+            <Route path="/configuracion" element={<Configuracion />} />
+            <Route path="/ventas" element={<Ventas />} />
+            {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </Layout>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>
