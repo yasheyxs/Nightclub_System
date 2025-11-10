@@ -2,10 +2,24 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Trophy, TrendingUp, Ticket, DollarSign, Plus, Edit, Trash2 } from "lucide-react";
+import {
+  Trophy,
+  TrendingUp,
+  Ticket,
+  DollarSign,
+  Plus,
+  Edit,
+  Trash2,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
 
@@ -21,12 +35,60 @@ interface Promoter {
 
 export default function Promotores() {
   const [promoters, setPromoters] = useState<Promoter[]>([
-    { id: "1", name: "Juan Pérez", ticketsSold: 145, revenue: 72500, ranking: 1, trend: "up", code: "JP2024" },
-    { id: "2", name: "María García", ticketsSold: 132, revenue: 66000, ranking: 2, trend: "up", code: "MG2024" },
-    { id: "3", name: "Carlos Rodríguez", ticketsSold: 118, revenue: 59000, ranking: 3, trend: "stable", code: "CR2024" },
-    { id: "4", name: "Ana Martínez", ticketsSold: 105, revenue: 52500, ranking: 4, trend: "down", code: "AM2024" },
-    { id: "5", name: "Luis Fernández", ticketsSold: 98, revenue: 49000, ranking: 5, trend: "up", code: "LF2024" },
-    { id: "6", name: "Sofia López", ticketsSold: 87, revenue: 43500, ranking: 6, trend: "stable", code: "SL2024" },
+    {
+      id: "1",
+      name: "Juan Pérez",
+      ticketsSold: 145,
+      revenue: 72500,
+      ranking: 1,
+      trend: "up",
+      code: "JP2024",
+    },
+    {
+      id: "2",
+      name: "María García",
+      ticketsSold: 132,
+      revenue: 66000,
+      ranking: 2,
+      trend: "up",
+      code: "MG2024",
+    },
+    {
+      id: "3",
+      name: "Carlos Rodríguez",
+      ticketsSold: 118,
+      revenue: 59000,
+      ranking: 3,
+      trend: "stable",
+      code: "CR2024",
+    },
+    {
+      id: "4",
+      name: "Ana Martínez",
+      ticketsSold: 105,
+      revenue: 52500,
+      ranking: 4,
+      trend: "down",
+      code: "AM2024",
+    },
+    {
+      id: "5",
+      name: "Luis Fernández",
+      ticketsSold: 98,
+      revenue: 49000,
+      ranking: 5,
+      trend: "up",
+      code: "LF2024",
+    },
+    {
+      id: "6",
+      name: "Sofia López",
+      ticketsSold: 87,
+      revenue: 43500,
+      ranking: 6,
+      trend: "stable",
+      code: "SL2024",
+    },
   ]);
 
   const [open, setOpen] = useState(false);
@@ -46,10 +108,15 @@ export default function Promotores() {
     if (editingId) {
       setPromoters(
         promoters.map((p) =>
-          p.id === editingId ? { ...p, name: formData.name, code: formData.code } : p
+          p.id === editingId
+            ? { ...p, name: formData.name, code: formData.code }
+            : p
         )
       );
-      toast({ title: "Actualizado", description: "Promotor modificado correctamente" });
+      toast({
+        title: "Actualizado",
+        description: "Promotor modificado correctamente",
+      });
     } else {
       const newPromoter: Promoter = {
         id: String(promoters.length + 1),
@@ -93,7 +160,8 @@ export default function Promotores() {
   };
 
   const getRankingBadge = (ranking: number) => {
-    if (ranking === 1) return "bg-accent text-accent-foreground shadow-glow-accent";
+    if (ranking === 1)
+      return "bg-accent text-accent-foreground shadow-glow-accent";
     if (ranking === 2) return "bg-muted text-foreground";
     if (ranking === 3) return "bg-warning/20 text-warning";
     return "bg-card text-foreground";
@@ -106,8 +174,12 @@ export default function Promotores() {
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-4xl font-bold text-foreground mb-2">Promotores</h1>
-          <p className="text-muted-foreground">Ranking y desempeño del equipo</p>
+          <h1 className="text-4xl font-bold text-foreground mb-2">
+            Promotores
+          </h1>
+          <p className="text-muted-foreground">
+            Ranking y desempeño del equipo
+          </p>
         </div>
         <Dialog
           open={open}
@@ -139,7 +211,9 @@ export default function Promotores() {
                 <Input
                   id="name"
                   value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, name: e.target.value })
+                  }
                   placeholder="Ej: Juan Pérez"
                   className="h-12 text-base"
                 />
@@ -151,7 +225,9 @@ export default function Promotores() {
                 <Input
                   id="code"
                   value={formData.code}
-                  onChange={(e) => setFormData({ ...formData, code: e.target.value })}
+                  onChange={(e) =>
+                    setFormData({ ...formData, code: e.target.value })
+                  }
                   placeholder="Ej: JP2024"
                   className="h-12 text-base"
                 />
@@ -186,7 +262,9 @@ export default function Promotores() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-foreground">{promoters.length}</div>
+            <div className="text-3xl font-bold text-foreground">
+              {promoters.length}
+            </div>
           </CardContent>
         </Card>
         <Card className="border-primary/50 bg-primary/5">
@@ -197,7 +275,9 @@ export default function Promotores() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-primary">{totalTickets}</div>
+            <div className="text-3xl font-bold text-primary">
+              {totalTickets}
+            </div>
           </CardContent>
         </Card>
         <Card className="border-success/50 bg-success/5">
@@ -238,36 +318,61 @@ export default function Promotores() {
 
                 <div className="flex-1 space-y-2">
                   <div className="flex items-center gap-3 flex-wrap">
-                    <h3 className="text-2xl font-bold text-foreground">{promoter.name}</h3>
+                    <h3 className="text-2xl font-bold text-foreground">
+                      {promoter.name}
+                    </h3>
                     <Badge variant="outline" className="font-mono text-xs">
                       {promoter.code}
                     </Badge>
-                    <div className={cn("flex items-center gap-1 text-sm font-semibold", getTrendColor(promoter.trend))}>
+                    <div
+                      className={cn(
+                        "flex items-center gap-1 text-sm font-semibold",
+                        getTrendColor(promoter.trend)
+                      )}
+                    >
                       <TrendingUp className="h-4 w-4" />
                       <span>{getTrendIcon(promoter.trend)}</span>
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
                     <div>
-                      <p className="text-xs text-muted-foreground uppercase tracking-wide">Entradas</p>
-                      <p className="text-2xl font-bold text-primary">{promoter.ticketsSold}</p>
+                      <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                        Entradas
+                      </p>
+                      <p className="text-2xl font-bold text-primary">
+                        {promoter.ticketsSold}
+                      </p>
                     </div>
                     <div>
-                      <p className="text-xs text-muted-foreground uppercase tracking-wide">Recaudación</p>
+                      <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                        Recaudación
+                      </p>
                       <p className="text-2xl font-bold text-success">
                         ${(promoter.revenue / 1000).toFixed(0)}k
                       </p>
                     </div>
                     <div>
-                      <p className="text-xs text-muted-foreground uppercase tracking-wide">Promedio</p>
+                      <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                        Promedio
+                      </p>
                       <p className="text-2xl font-bold text-accent">
-                        ${promoter.ticketsSold > 0 ? Math.round(promoter.revenue / promoter.ticketsSold) : 0}
+                        $
+                        {promoter.ticketsSold > 0
+                          ? Math.round(promoter.revenue / promoter.ticketsSold)
+                          : 0}
                       </p>
                     </div>
                     <div>
-                      <p className="text-xs text-muted-foreground uppercase tracking-wide">Participación</p>
+                      <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                        Participación
+                      </p>
                       <p className="text-2xl font-bold text-foreground">
-                        {totalTickets > 0 ? Math.round((promoter.ticketsSold / totalTickets) * 100) : 0}%
+                        {totalTickets > 0
+                          ? Math.round(
+                              (promoter.ticketsSold / totalTickets) * 100
+                            )
+                          : 0}
+                        %
                       </p>
                     </div>
                   </div>
