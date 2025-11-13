@@ -30,9 +30,17 @@ try {
     $method = $_SERVER['REQUEST_METHOD'];
 
     // ===========================================================
+    // FUNCIÓN: Desactivar eventos ya ocurridos
+    // ===========================================================
+    function desactivar_eventos_pasados(PDO $pdo): void
+    {
+        $pdo->exec("UPDATE eventos SET activo = false WHERE fecha < NOW() AND activo = true");
+    }
+
+    // ===========================================================
     // FUNCIÓN: Generar automáticamente los próximos 5 sábados
     // ===========================================================
-    function generar_sabados(PDO $pdo, int $cantidad = 5, int $cupo = 800): array
+    function generar_sabados(PDO $pdo, int $cantidad = 5, int $cupo = 1000): array
     {
         $hoy = new DateTime('today');
         $w = (int)$hoy->format('w');
@@ -42,6 +50,14 @@ try {
 
         $eventos = [];
 
+        $consultaExistente = $pdo->prepare("
+            SELECT id, nombre, detalle, fecha, capacidad, activo
+            FROM eventos
+            WHERE fecha::date = :fecha::date AND activo = true
+            ORDER BY fecha ASC
+            LIMIT 1
+        ");
+
         $insert = $pdo->prepare("
             INSERT INTO eventos (nombre, detalle, fecha, capacidad, activo, fecha_creacion)
             VALUES (:nombre, :detalle, :fecha, :capacidad, true, NOW())
@@ -50,6 +66,17 @@ try {
         ");
 
         for ($i = 0; $i < $cantidad; $i++) {
+            $fechaDia = $hoy->format('Y-m-d');
+            $consultaExistente->execute([':fecha' => $fechaDia]);
+            $manual = $consultaExistente->fetch(PDO::FETCH_ASSOC);
+            $consultaExistente->closeCursor();
+
+            if ($manual) {
+                $eventos[] = $manual;
+                $hoy->modify('+7 day');
+                continue;
+            }
+
             $fecha = $hoy->format('Y-m-d 23:00:00');
 
             $insert->execute([
@@ -60,17 +87,17 @@ try {
             ]);
 
             $evento = $insert->fetch(PDO::FETCH_ASSOC);
+            $insert->closeCursor();
+
             if (!$evento) {
-                // Si ya existía, obtenerlo
-                $query = $pdo->prepare("
-                    SELECT id, nombre, detalle, fecha, capacidad, activo
-                    FROM eventos
-                    WHERE fecha::date = :fecha::date
-                ");
-                $query->execute([':fecha' => $fecha]);
-                $evento = $query->fetch(PDO::FETCH_ASSOC);
+                $consultaExistente->execute([':fecha' => $fechaDia]);
+                $evento = $consultaExistente->fetch(PDO::FETCH_ASSOC);
+                $consultaExistente->closeCursor();
             }
-            if ($evento) $eventos[] = $evento;
+
+            if ($evento) {
+                $eventos[] = $evento;
+            }
 
             $hoy->modify('+7 day');
         }
@@ -94,6 +121,8 @@ try {
         ];
     }
 
+    desactivar_eventos_pasados($pdo);
+
     // ===========================================================
     // MÉTODOS PRINCIPALES
     // ===========================================================
@@ -103,13 +132,13 @@ try {
         $calendar = isset($_GET['calendar']) && $_GET['calendar'] === '1';
 
         if ($upcoming) {
-            $eventos = generar_sabados($pdo, 5, 800);
+            $eventos = generar_sabados($pdo, 5, 1000);
             echo json_encode(array_map('map_event', $eventos));
             exit;
         }
 
         if ($calendar) {
-            generar_sabados($pdo, 5, 800);
+            generar_sabados($pdo, 5, 1000);
             $desde = (new DateTime('today'))->format('Y-m-d');
             $hasta = (new DateTime('+60 days'))->format('Y-m-d');
 
@@ -117,6 +146,7 @@ try {
                 SELECT id, nombre, detalle, fecha, capacidad, activo
                 FROM eventos
                 WHERE fecha::date BETWEEN :desde AND :hasta
+                AND activo = true
                 ORDER BY fecha ASC
             ");
             $stmt->execute([':desde' => $desde, ':hasta' => $hasta]);
@@ -129,6 +159,7 @@ try {
         $stmt = $pdo->query("
             SELECT id, nombre, detalle, fecha, capacidad, activo
             FROM eventos
+            WHERE activo = true AND fecha >= NOW()
             ORDER BY fecha ASC
         ");
         echo json_encode(array_map('map_event', $stmt->fetchAll(PDO::FETCH_ASSOC)));

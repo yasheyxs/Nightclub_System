@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -6,6 +6,8 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -29,16 +31,19 @@ export default function Eventos() {
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Event | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Event | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const [form, setForm] = useState({
     nombre: "",
     detalle: "",
     fecha: "",
-    capacidad: "",
+    capacidad: "1000",
   });
 
   // ---- Helpers ----
-  const onlyFutureSorted = (list: Event[]) => {
+  const onlyFutureSorted = useCallback((list: Event[]) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     return list
@@ -50,7 +55,7 @@ export default function Eventos() {
       .sort(
         (a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime()
       );
-  };
+  }, []);
 
   const findByDate = (date: Date) => {
     const target = new Date(date);
@@ -83,7 +88,26 @@ export default function Eventos() {
       }
     };
     fetchEvents();
-  }, []);
+  }, [onlyFutureSorted]);
+
+  useEffect(() => {
+    const prune = () => {
+      setEvents((prev) => {
+        const next = onlyFutureSorted([...prev]);
+        if (
+          next.length === prev.length &&
+          next.every((event, index) => event.id === prev[index].id)
+        ) {
+          return prev;
+        }
+        return next;
+      });
+    };
+
+    prune();
+    const interval = setInterval(prune, 1000 * 60 * 30);
+    return () => clearInterval(interval);
+  }, [onlyFutureSorted]);
 
   // ---- Guardar (crear/editar) ----
   const handleSave = async () => {
@@ -138,21 +162,33 @@ export default function Eventos() {
   };
 
   // ---- Eliminar ----
-  const handleDelete = async (id: number) => {
-    if (!confirm("¿Seguro que querés eliminar este evento?")) return;
+  const requestDelete = (event: Event) => {
+    setDeleteTarget(event);
+    setDeleteOpen(true);
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleteLoading(true);
     try {
-      await api.delete(`/eventos.php?id=${id}`);
-      setEvents((prev) => onlyFutureSorted(prev.filter((e) => e.id !== id)));
+      await api.delete(`/eventos.php?id=${deleteTarget.id}`);
+      setEvents((prev) =>
+        onlyFutureSorted(prev.filter((e) => e.id !== deleteTarget.id))
+      );
       toast({
         title: "Evento eliminado",
         description: "Se eliminó correctamente.",
       });
+      setDeleteOpen(false);
+      setDeleteTarget(null);
     } catch (error) {
       toast({
         title: "Error",
         description: "No se pudo eliminar el evento.",
         variant: "destructive",
       });
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -436,7 +472,7 @@ export default function Eventos() {
                   </Button>
                   <Button
                     variant="destructive"
-                    onClick={() => handleDelete(event.id)}
+                    onClick={() => requestDelete(event)}
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
@@ -500,7 +536,7 @@ export default function Eventos() {
                     onChange={(e) =>
                       setForm({ ...form, capacidad: e.target.value })
                     }
-                    placeholder="Ej: 800"
+                    placeholder="Ej: 1000"
                   />
                 </div>
               </div>
@@ -529,6 +565,50 @@ export default function Eventos() {
               {editing ? "Guardar Cambios" : "Crear Evento"}
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={deleteOpen}
+        onOpenChange={(value) => {
+          if (!value && deleteLoading) {
+            return;
+          }
+          setDeleteOpen(value);
+          if (!value) {
+            setDeleteTarget(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Eliminar evento</DialogTitle>
+            <DialogDescription>
+              {deleteTarget
+                ? `¿Querés eliminar "${deleteTarget.nombre}"?`
+                : "Esta acción no se puede deshacer."}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (deleteLoading) return;
+                setDeleteOpen(false);
+                setDeleteTarget(null);
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={deleteLoading}
+              className="gap-2"
+            >
+              {deleteLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+              Eliminar
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
