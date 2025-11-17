@@ -232,20 +232,25 @@ try {
             e.id,
             e.fecha,
             e.capacidad,
-            COALESCE(SUM(ve.cantidad), 0) AS entradas,
-            COALESCE(SUM(ve.total), 0) AS total
+            COALESCE(ce.total_vendido, COALESCE(SUM(ve.cantidad), 0)) AS entradas,
+            COALESCE(ce.total_monto, COALESCE(SUM(ve.total), 0)) AS total,
+            COALESCE(
+                ce.porcentaje,
+                CASE
+                    WHEN e.capacidad > 0 THEN (COALESCE(SUM(ve.cantidad), 0) * 100.0) / e.capacidad
+                    ELSE NULL
+                END
+            ) AS ocupacion_evento
         FROM eventos e
         LEFT JOIN ventas_entradas ve ON e.id = ve.evento_id
+        LEFT JOIN cierres_eventos ce ON ce.evento_id = e.id
         WHERE e.fecha >= :mstart::date AND e.fecha < :mend::date  -- Considera todos los eventos del mes
-        GROUP BY e.id, e.fecha, e.capacidad
+        GROUP BY e.id, e.fecha, e.capacidad, ce.total_vendido, ce.total_monto, ce.porcentaje
     ),
     daily_stats AS (
         SELECT
             DATE(fecha) AS dia,
-            CASE
-                WHEN SUM(capacidad) > 0 THEN (SUM(entradas) * 100.0) / SUM(capacidad)
-                ELSE NULL
-            END AS ocupacion
+            AVG(ocupacion_evento) AS ocupacion
         FROM event_stats
         GROUP BY DATE(fecha)
     )
@@ -411,20 +416,25 @@ try {
                 e.id,
                 e.fecha,
                 e.capacidad,
-                COALESCE(SUM(ve.cantidad), 0) AS entradas,
-                COALESCE(SUM(ve.total), 0) AS total
+                COALESCE(ce.total_vendido, COALESCE(SUM(ve.cantidad), 0)) AS entradas,
+                COALESCE(ce.total_monto, COALESCE(SUM(ve.total), 0)) AS total,
+                COALESCE(
+                    ce.porcentaje,
+                    CASE
+                        WHEN e.capacidad > 0 THEN (COALESCE(SUM(ve.cantidad), 0) * 100.0) / e.capacidad
+                        ELSE NULL
+                    END
+                ) AS ocupacion_evento
             FROM eventos e
             LEFT JOIN ventas_entradas ve ON e.id = ve.evento_id
+            LEFT JOIN cierres_eventos ce ON ce.evento_id = e.id
             WHERE e.fecha >= :mstart::date AND e.fecha < :mend::date
-            GROUP BY e.id, e.fecha, e.capacidad
+            GROUP BY e.id, e.fecha, e.capacidad, ce.total_vendido, ce.total_monto, ce.porcentaje
         ),
         daily_stats AS (
             SELECT
                 DATE(fecha) AS dia,
-                CASE
-                    WHEN SUM(capacidad) > 0 THEN (SUM(entradas) * 100.0) / SUM(capacidad)
-                    ELSE NULL
-                END AS ocupacion
+                AVG(ocupacion_evento) AS ocupacion
             FROM event_stats
             GROUP BY DATE(fecha)
         )
