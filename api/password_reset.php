@@ -21,7 +21,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 // **Nuevo enfoque**: Mostrar el contenido del archivo .env para depuración
-$envFilePath = __DIR__ . '/../.env';  // Asegúrate de que esta ruta sea correcta
+$envFilePath = __DIR__ . '/../.env';
 
 // Verificar si el archivo .env existe y mostrar su contenido
 $envExists = file_exists($envFilePath);

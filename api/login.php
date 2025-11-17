@@ -83,14 +83,33 @@ if ($telefono === '' || $clave === '') {
 }
 
 try {
-    // Consultar el usuario en la base de datos
-    $stmt = $conn->prepare("SELECT id, telefono, nombre, email, rol_id, activo, clave_bcrypt FROM usuarios WHERE telefono = :telefono LIMIT 1");
+    // Consultar el usuario en la base de datos junto con su rol
+    $stmt = $conn->prepare("SELECT u.id, u.telefono, u.nombre, u.email, u.rol_id, u.activo, u.clave_bcrypt, r.nombre AS rol_nombre FROM usuarios u LEFT JOIN roles r ON u.rol_id = r.id WHERE u.telefono = :telefono LIMIT 1");
     $stmt->execute([':telefono' => $telefono]);
     $usuario = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    if (!$usuario || !$usuario['activo']) {
+    if (!$usuario) {
         http_response_code(401);
         echo json_encode(['error' => 'Credenciales inválidas']);
+        exit;
+    }
+
+    $estaActivo = false;
+    if (isset($usuario['activo'])) {
+        $valorActivo = $usuario['activo'];
+        if (is_bool($valorActivo)) {
+            $estaActivo = $valorActivo;
+        } elseif (is_numeric($valorActivo)) {
+            $estaActivo = (int)$valorActivo === 1;
+        } elseif (is_string($valorActivo)) {
+            $valorNormalizado = strtolower(trim($valorActivo));
+            $estaActivo = in_array($valorNormalizado, ['1', 't', 'true', 'on', 'si', 'sí', 'yes']);
+        }
+    }
+
+    if (!$estaActivo) {
+        http_response_code(403);
+        echo json_encode(['error' => 'El usuario no está activo']);
         exit;
     }
 
@@ -101,8 +120,36 @@ try {
         exit;
     }
 
+    $rolNombre = isset($usuario['rol_nombre']) ? trim($usuario['rol_nombre']) : '';
+    $rolSlug = $rolNombre !== ''
+        ? (function_exists('mb_strtolower') ? mb_strtolower($rolNombre, 'UTF-8') : strtolower($rolNombre))
+        : '';
+
+    // Normalizar nombres comunes de roles
+    $mapaRoles = [
+        'administrador' => 'admin',
+        'admin' => 'admin',
+        'vendedor' => 'vendedor',
+        'seller' => 'vendedor',
+        'promotor' => 'promotor',
+        'promoter' => 'promotor'
+    ];
+
+    if ($rolSlug !== '' && isset($mapaRoles[$rolSlug])) {
+        $rolSlug = $mapaRoles[$rolSlug];
+    }
+
+    if ($rolSlug === 'promotor') {
+        http_response_code(403);
+        echo json_encode(['error' => 'Los promotores no tienen acceso al sistema']);
+        exit;
+    }
+
     // Eliminar la contraseña del usuario antes de devolverlo
     unset($usuario['clave_bcrypt']);
+
+    $usuario['rol_slug'] = $rolSlug !== '' ? $rolSlug : null;
+    $usuario['activo'] = (bool)$estaActivo;
 
     // Generar el token (puedes cambiar a JWT si prefieres)
     $token = bin2hex(random_bytes(32));

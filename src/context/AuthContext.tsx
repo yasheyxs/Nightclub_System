@@ -6,6 +6,7 @@ import {
   useState,
 } from "react";
 import { API_BASE_URL } from "@/lib/constants";
+import { normalizeRoleSlug, type RoleSlug } from "@/lib/permissions";
 
 export interface AuthUser {
   id: number;
@@ -13,6 +14,9 @@ export interface AuthUser {
   nombre: string;
   email: string;
   rol_id: number;
+  rol_nombre?: string | null;
+  rol_slug?: string | null;
+  roleSlug?: RoleSlug;
   activo?: boolean;
   fecha_creacion?: string;
 }
@@ -20,7 +24,7 @@ export interface AuthUser {
 interface AuthContextValue {
   user: AuthUser | null;
   token: string | null;
-  login: (telefono: string, password: string) => Promise<void>;
+  login: (telefono: string, password: string) => Promise<AuthUser>;
   logout: () => void;
 }
 
@@ -35,12 +39,29 @@ interface AuthProviderProps {
 const USER_STORAGE_KEY = "santas:user";
 const TOKEN_STORAGE_KEY = "santas:token";
 
+const enhanceUser = (rawUser: unknown): AuthUser | null => {
+  if (!rawUser || typeof rawUser !== "object") {
+    return null;
+  }
+
+  const parsed = rawUser as AuthUser;
+  const roleSlug = normalizeRoleSlug(
+    parsed.rol_slug ?? parsed.rol_nombre ?? null
+  );
+
+  return {
+    ...parsed,
+    rol_slug: roleSlug,
+    roleSlug,
+  };
+};
+
 export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<AuthUser | null>(() => {
     const stored = localStorage.getItem(USER_STORAGE_KEY);
     if (stored) {
       try {
-        return JSON.parse(stored) as AuthUser;
+        return enhanceUser(JSON.parse(stored));
       } catch (error) {
         console.error("Error parsing user data from localStorage", error);
         return null; // Si ocurre un error en el parseo, retornamos null
@@ -67,10 +88,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
       throw new Error(data?.error ?? "No se pudo iniciar sesión");
     }
 
-    setUser(data.user);
+    const normalizedUser = enhanceUser(data.user);
+
+    if (!normalizedUser) {
+      throw new Error("No se pudo procesar la información del usuario");
+    }
+
+    setUser(normalizedUser);
+
     setToken(data.token);
-    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(data.user));
+    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(normalizedUser));
     localStorage.setItem(TOKEN_STORAGE_KEY, data.token);
+    return normalizedUser;
   }, []);
 
   const logout = useCallback(() => {

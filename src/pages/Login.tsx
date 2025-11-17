@@ -12,6 +12,11 @@ import { Button } from "@/components/ui/button";
 import { AuthLayout } from "@/components/AuthLayout";
 import { useAuth } from "@/hooks/useAuth";
 import { toast } from "sonner";
+import {
+  ensureAllowedRoute,
+  normalizeRoleSlug,
+  type RoleSlug,
+} from "@/lib/permissions";
 
 const Login = () => {
   const { login, user } = useAuth();
@@ -40,9 +45,15 @@ const Login = () => {
 
     setLoading(true);
     try {
-      await login(telefono, password);
+      const authenticatedUser = await login(telefono, password);
+      const roleSlug: RoleSlug =
+        authenticatedUser.roleSlug ??
+        normalizeRoleSlug(
+          authenticatedUser.rol_slug ?? authenticatedUser.rol_nombre ?? null
+        );
       toast.success("Sesión iniciada correctamente");
-      navigate(from, { replace: true });
+      const destination = ensureAllowedRoute(from, roleSlug);
+      navigate(destination, { replace: true });
     } catch (error) {
       // Asegúrate de capturar un error si es una cadena o cualquier tipo
       const message =
@@ -54,10 +65,13 @@ const Login = () => {
   };
 
   useEffect(() => {
-    if (user) {
-      navigate("/", { replace: true });
-    }
-  }, [navigate, user]);
+    if (!user) return;
+    const roleSlug: RoleSlug =
+      user.roleSlug ??
+      normalizeRoleSlug(user.rol_slug ?? user.rol_nombre ?? null);
+    const destination = ensureAllowedRoute(from, roleSlug);
+    navigate(destination, { replace: true });
+  }, [from, navigate, user]);
 
   return (
     <AuthLayout

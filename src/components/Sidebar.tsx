@@ -6,22 +6,67 @@ import {
   Settings,
   UserPlus,
   LogOut,
+  type LucideIcon,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
+import { normalizeRoleSlug, type RoleSlug } from "@/lib/permissions";
 
-const navigation = [
-  { name: "Dashboard", href: "/", icon: LayoutDashboard },
-  { name: "Entradas", href: "/entradas", icon: Ticket },
-  { name: "Eventos", href: "/eventos", icon: Calendar },
-  { name: "Listas", href: "/listas", icon: Users },
-  { name: "Usuarios", href: "/usuarios", icon: UserPlus },
-  { name: "Configuración entradas", href: "/configuracion", icon: Settings },
+type NavigationItem = {
+  name: string;
+  href: string;
+  icon: LucideIcon;
+  allowedRoles?: RoleSlug[];
+};
+
+const navigation: NavigationItem[] = [
+  {
+    name: "Dashboard",
+    href: "/",
+    icon: LayoutDashboard,
+    allowedRoles: ["admin"],
+  },
+  {
+    name: "Entradas",
+    href: "/entradas",
+    icon: Ticket,
+    allowedRoles: ["admin", "vendedor"],
+  },
+  {
+    name: "Eventos",
+    href: "/eventos",
+    icon: Calendar,
+    allowedRoles: ["admin"],
+  },
+  {
+    name: "Listas",
+    href: "/listas",
+    icon: Users,
+    allowedRoles: ["admin", "vendedor"],
+  },
+  {
+    name: "Usuarios",
+    href: "/usuarios",
+    icon: UserPlus,
+    allowedRoles: ["admin"],
+  },
+  {
+    name: "Configuración entradas",
+    href: "/configuracion",
+    icon: Settings,
+    allowedRoles: ["admin"],
+  },
 ];
 
 export function Sidebar() {
   const { user, logout } = useAuth();
+  const roleSlug: RoleSlug =
+    user?.roleSlug ??
+    normalizeRoleSlug(user?.rol_slug ?? user?.rol_nombre ?? null);
+  const availableNavigation = navigation.filter(
+    (item) => !item.allowedRoles || item.allowedRoles.includes(roleSlug)
+  );
 
   return (
     <aside className="fixed left-0 top-0 z-40 h-screen w-20 lg:w-64 border-r border-border bg-sidebar transition-all duration-300">
@@ -34,7 +79,7 @@ export function Sidebar() {
         </div>
         <nav className="flex flex-1 flex-col">
           <ul role="list" className="flex flex-1 flex-col gap-y-2">
-            {navigation.map((item) => (
+            {availableNavigation.map((item) => (
               <li key={item.name}>
                 <NavLink
                   to={item.href}
