@@ -89,7 +89,7 @@ const Login = () => {
               id="telefono"
               type="tel"
               autoComplete="tel"
-              className="pl-10 bg-surface-elevated border-border"
+              className="pl-10 bg-surface-elevated border-border text-black placeholder:text-muted-foreground"
               placeholder="351 555 4444"
               value={telefono}
               onChange={(event) => setTelefono(event.target.value)}
@@ -108,7 +108,7 @@ const Login = () => {
               id="password"
               type="password"
               autoComplete="current-password"
-              className="pl-10 bg-surface-elevated border-border"
+              className="pl-10 bg-surface-elevated border-border text-black placeholder:text-muted-foreground"
               placeholder="••••••••"
               value={password}
               onChange={(event) => setPassword(event.target.value)}

@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ChangeEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { KPICard } from "@/components/KPICard";
 import {
   DollarSign,
@@ -13,13 +20,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -140,23 +141,15 @@ export default function Dashboard(): JSX.Element {
     );
   }, [data]);
 
-  const monthOptions = useMemo(() => {
-    const options: { value: string; label: string }[] = [];
-    const formatter = new Intl.DateTimeFormat("es-AR", {
-      month: "long",
-      year: "numeric",
-    });
-    for (let i = 0; i < 8; i += 1) {
-      const ref = new Date();
-      ref.setMonth(ref.getMonth() - i, 1);
-      const value = ref.toISOString().slice(0, 7);
-      const label = formatter
-        .format(ref)
-        .replace(/^./, (char) => char.toUpperCase());
-      options.push({ value, label });
-    }
-    return options;
-  }, []);
+  const maxSelectableMonth = useMemo(
+    () => new Date().toISOString().slice(0, 7),
+    []
+  );
+
+  const handleMonthChange = (event: ChangeEvent<HTMLInputElement>) => {
+    if (!event.target.value) return;
+    setSelectedMonth(event.target.value);
+  };
 
   // ---- Calendario filtrable ----
   const findEventByDate = (date: Date) => {
@@ -216,18 +209,13 @@ export default function Dashboard(): JSX.Element {
           </p>
         </div>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-            <SelectTrigger className="w-full sm:w-56">
-              <SelectValue placeholder="Seleccionar mes" />
-            </SelectTrigger>
-            <SelectContent>
-              {monthOptions.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Input
+            type="month"
+            value={selectedMonth}
+            onChange={handleMonthChange}
+            className="w-full sm:w-56"
+            max={maxSelectableMonth}
+          />
           <Button
             variant="outline"
             onClick={() =>

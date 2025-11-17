@@ -72,6 +72,28 @@ function pdfEscape(string $text): string
     return str_replace(['\\', '(', ')'], ['\\\\', '\\(', '\\)'], $text);
 }
 
+function removeAccents(string $text): string
+{
+    $map = [
+        'á' => 'a',
+        'é' => 'e',
+        'í' => 'i',
+        'ó' => 'o',
+        'ú' => 'u',
+        'Á' => 'A',
+        'É' => 'E',
+        'Í' => 'I',
+        'Ó' => 'O',
+        'Ú' => 'U',
+        'ñ' => 'n',
+        'Ñ' => 'N',
+        'ü' => 'u',
+        'Ü' => 'U',
+    ];
+
+    return strtr($text, $map);
+}
+
 function buildSimplePdf(array $lines): string
 {
     $content = "BT\n/F1 16 Tf\n";
@@ -159,7 +181,8 @@ function sendPdfExport(string $filename, array $metrics, ?array $monthlySummary,
         }
     }
 
-    $pdf = buildSimplePdf($lines);
+    $sanitizedLines = array_map('removeAccents', $lines);
+    $pdf = buildSimplePdf($sanitizedLines);
     header('Content-Type: application/pdf');
     header('Content-Disposition: attachment; filename="' . $filename . '"');
     echo $pdf;

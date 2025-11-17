@@ -127,6 +127,9 @@ try {
             $pdo->prepare("DELETE FROM ventas_entradas WHERE evento_id = :evento_id")
                 ->execute([':evento_id' => $eventoId]);
 
+            $pdo->prepare("UPDATE eventos SET activo = false WHERE id = :id")
+                ->execute([':id' => $eventoId]);
+
             echo json_encode([
                 'mensaje' => 'Evento cerrado correctamente.',
                 'cierre' => [
@@ -181,6 +184,22 @@ try {
 
         if ($accion === 'restar') $cantidad = -abs($cantidad);
         else $cantidad = abs($cantidad);
+
+        if ($eventoId !== null) {
+            $eventoActivoStmt = $pdo->prepare("SELECT activo FROM eventos WHERE id = :id");
+            $eventoActivoStmt->execute([':id' => $eventoId]);
+            $eventoActivo = $eventoActivoStmt->fetch();
+
+            $estaActivo = $eventoActivo && isset($eventoActivo['activo'])
+                ? filter_var($eventoActivo['activo'], FILTER_VALIDATE_BOOLEAN)
+                : false;
+
+            if (!$estaActivo) {
+                http_response_code(400);
+                echo json_encode(['error' => 'El evento está cerrado o no existe.']);
+                exit;
+            }
+        }
 
         // Obtener precio base de la entrada
         $entradaStmt = $pdo->prepare("SELECT precio_base FROM entradas WHERE id = :id AND activo = true");

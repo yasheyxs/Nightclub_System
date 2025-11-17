@@ -79,8 +79,10 @@ try {
 
             $fecha = $hoy->format('Y-m-d 23:00:00');
 
+            $nombreAuto = 'Evento - ' . $hoy->format('d/m/Y');
+
             $insert->execute([
-                ':nombre' => 'Evento',
+                ':nombre' => $nombreAuto,
                 ':detalle' => null,
                 ':fecha' => $fecha,
                 ':capacidad' => $cupo

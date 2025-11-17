@@ -214,10 +214,18 @@ export default function Entradas() {
           title: "Evento cerrado",
           description: "Se guardó el resumen y se reiniciaron los contadores.",
         });
+        const closedId = Number(selectedEvent);
         setVentasPorEvento((prev) => {
           const updated = { ...prev };
-          updated[selectedEvent] = {};
+          delete updated[selectedEvent];
           return updated;
+        });
+        setEvents((prev) => {
+          const filtered = prev.filter((event) => event.id !== closedId);
+          if (!filtered.some((event) => String(event.id) === selectedEvent)) {
+            setSelectedEvent(filtered.length > 0 ? String(filtered[0].id) : "");
+          }
+          return filtered;
         });
         setShowSummary(false);
       })
