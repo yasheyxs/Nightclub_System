@@ -48,6 +48,8 @@ interface EventData {
   consumoPromedio: number;
   barrasActivas: number;
   mesasReservadas: number;
+  activo?: boolean;
+  cerrado?: boolean;
 }
 
 interface CurrentNight {
@@ -74,6 +76,7 @@ interface DashboardResponse {
   currentNight: CurrentNight | null;
   upcomingEvents: EventData[];
   pastEvents: EventData[];
+  calendarEvents?: EventData[];
   monthlySummary: MonthlySummary;
 }
 
@@ -141,6 +144,14 @@ export default function Dashboard(): JSX.Element {
     );
   }, [data]);
 
+  const calendarEvents = useMemo(() => {
+    if (!data) return [];
+    if (data.calendarEvents && data.calendarEvents.length > 0) {
+      return data.calendarEvents;
+    }
+    return data.pastEvents;
+  }, [data]);
+
   const maxSelectableMonth = useMemo(
     () => new Date().toISOString().slice(0, 7),
     []
@@ -153,9 +164,9 @@ export default function Dashboard(): JSX.Element {
 
   // ---- Calendario filtrable ----
   const findEventByDate = (date: Date) => {
-    if (!data) return null;
+    if (!calendarEvents.length) return null;
     const target = date.toISOString().split("T")[0];
-    return data.pastEvents.find((e) => e.date.split("T")[0] === target) || null;
+    return calendarEvents.find((e) => e.date.split("T")[0] === target) || null;
   };
 
   const lastClickRef = useRef<{ date: Date; time: number } | null>(null);
@@ -171,13 +182,6 @@ export default function Dashboard(): JSX.Element {
       if (!event) {
         setSelectedEvent(null);
         setCalendarMessage("No hay evento registrado este día.");
-        setOpenSummary(true);
-      } else if (
-        event.entradasVendidas === 0 &&
-        Math.round(event.recaudacion) === 0
-      ) {
-        setSelectedEvent(null);
-        setCalendarMessage("No hay datos del evento.");
         setOpenSummary(true);
       } else {
         setCalendarMessage(null);
@@ -320,17 +324,21 @@ export default function Dashboard(): JSX.Element {
               tileClassName={({ date }) => {
                 const e = findEventByDate(date);
                 if (!e) return "";
-                const hasData =
-                  e.entradasVendidas > 0 || Math.round(e.recaudacion) > 0;
-                return hasData ? "event-purple" : "event-blue";
+                if (e.cerrado) return "event-purple";
+                const eventDate = new Date(e.date);
+                return eventDate.getTime() >= Date.now()
+                  ? "event-green"
+                  : "event-blue";
               }}
               tileContent={({ date }) => {
                 const e = findEventByDate(date);
                 return e ? (
                   <div
                     className={`mt-1 h-1 w-1 mx-auto rounded-full ${
-                      e.entradasVendidas > 0 || Math.round(e.recaudacion) > 0
+                      e.cerrado
                         ? "bg-purple-400"
+                        : new Date(e.date).getTime() >= Date.now()
+                        ? "bg-green-400"
                         : "bg-blue-400"
                     }`}
                   />
@@ -414,9 +422,24 @@ export default function Dashboard(): JSX.Element {
           )}
           {selectedEvent && !calendarMessage && (
             <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">
-                Fecha: {formatDate(selectedEvent.date)}
-              </p>
+              <div className="flex items-center justify-between text-sm text-muted-foreground">
+                <p>Fecha: {formatDate(selectedEvent.date)}</p>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                    selectedEvent.cerrado
+                      ? "bg-purple-100/10 text-purple-300"
+                      : new Date(selectedEvent.date).getTime() >= Date.now()
+                      ? "bg-green-100/10 text-green-300"
+                      : "bg-blue-100/10 text-blue-300"
+                  }`}
+                >
+                  {selectedEvent.cerrado
+                    ? "Evento cerrado"
+                    : new Date(selectedEvent.date).getTime() >= Date.now()
+                    ? "Próximo evento"
+                    : "Evento registrado"}
+                </span>
+              </div>
               <p>Entradas: {selectedEvent.entradasVendidas}</p>
               <p>Recaudación: {formatCurrency(selectedEvent.recaudacion)}</p>
               <Progress value={selectedEvent.ocupacion} className="h-2" />
@@ -491,6 +514,14 @@ export default function Dashboard(): JSX.Element {
           }
           .dark-calendar .event-purple:hover {
             background-color: rgba(147, 51, 234, 0.55) !important;
+          }
+          .dark-calendar .event-green {
+            background-color: rgba(34, 197, 94, 0.4) !important;
+            color: #fff !important;
+            border-radius: 0.5rem;
+          }
+          .dark-calendar .event-green:hover {
+            background-color: rgba(74, 222, 128, 0.55) !important;
           }
           .dark-calendar .react-calendar__month-view__days__day--neighboringMonth {
             opacity: 0.25;

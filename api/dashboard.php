@@ -233,7 +233,7 @@ try {
             ROUND(AVG((COALESCE(ve.cantidad,0)*100.0)/NULLIF(e.capacidad,0))) AS ocupacion_promedio
         FROM eventos e
         LEFT JOIN ventas_entradas ve ON e.id = ve.evento_id
-        WHERE e.fecha >= :mstart::date AND e.fecha < :mend::date AND e.activo = TRUE
+        WHERE e.fecha >= :mstart::date AND e.fecha < :mend::date
     ";
     $st = $pdo->prepare($metricsSql);
     $st->execute([':mstart' => $monthStart, ':mend' => $monthEnd]);
@@ -350,6 +350,37 @@ try {
         'mesasReservadas' => 0
     ], $pst->fetchAll() ?: []);
 
+    $calendarStmt = $pdo->prepare("
+        SELECT e.id,
+               e.nombre AS name,
+               TO_CHAR(e.fecha, 'YYYY-MM-DD HH24:MI:SS') AS date_text,
+               COALESCE(ce.total_vendido, COALESCE(SUM(ve.cantidad),0)) AS entradas_vendidas,
+               COALESCE(ce.total_monto, COALESCE(SUM(ve.total),0)) AS recaudacion,
+               COALESCE(
+                    ce.porcentaje,
+                    ROUND((COALESCE(SUM(ve.cantidad),0)*100.0)/NULLIF(e.capacidad,0))
+               ) AS ocupacion,
+               e.activo AS activo,
+               CASE WHEN ce.evento_id IS NOT NULL THEN TRUE ELSE FALSE END AS cerrado
+        FROM eventos e
+        LEFT JOIN ventas_entradas ve ON ve.evento_id = e.id
+        LEFT JOIN cierres_eventos ce ON ce.evento_id = e.id
+        WHERE DATE(e.fecha) >= :mstart::date AND DATE(e.fecha) < :mend::date
+        GROUP BY e.id, e.nombre, e.fecha, e.capacidad, ce.total_vendido, ce.total_monto, ce.porcentaje, e.activo, ce.evento_id
+        ORDER BY e.fecha ASC
+    ");
+    $calendarStmt->execute([':mstart' => $monthStart, ':mend' => $monthEnd]);
+    $calendarEvents = array_map(fn($r) => [
+        'id' => (string)$r['id'],
+        'name' => $r['name'],
+        'date' => str_replace(' ', 'T', $r['date_text']),
+        'entradasVendidas' => (int)$r['entradas_vendidas'],
+        'recaudacion' => (float)$r['recaudacion'],
+        'ocupacion' => (int)($r['ocupacion'] ?? 0),
+        'activo' => filter_var($r['activo'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? false,
+        'cerrado' => filter_var($r['cerrado'], FILTER_VALIDATE_BOOLEAN)
+    ], $calendarStmt->fetchAll() ?: []);
+
     // === 5. Resumen mensual ===
     $monthlySql = "
         SELECT TO_CHAR(:mstart::date, 'TMMonth YYYY') AS month_label,
@@ -434,6 +465,7 @@ try {
         'currentNight' => $currentNight,
         'upcomingEvents' => $upcomingEvents,
         'pastEvents' => $pastEvents,
+        'calendarEvents' => $calendarEvents,
         'monthlySummary' => $monthlySummary,
         'salesData' => $salesData,
         'attendanceData' => $attendanceData,

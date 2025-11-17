@@ -61,6 +61,7 @@ interface DashboardResponse {
   currentNight: CurrentNight | null;
   upcomingEvents: UpcomingEvent[];
   pastEvents: PastEvent[];
+  calendarEvents?: PastEvent[];
   monthlySummary: MonthlySummary;
 }
 
