@@ -225,36 +225,39 @@ try {
     }
 
     // === 1. Métricas del mes ===
+    // Asegúrate de que todos los eventos del mes, ya cerrados o no, sean considerados.
     $metricsSql = "
     WITH event_stats AS (
-            SELECT
-                e.id,
-                e.fecha,
-                e.capacidad,
-                COALESCE(SUM(ve.cantidad), 0) AS entradas,
-                COALESCE(SUM(ve.total), 0) AS total
-            FROM eventos e
-            LEFT JOIN ventas_entradas ve ON e.id = ve.evento_id
-            WHERE e.fecha >= :mstart::date AND e.fecha < :mend::date
-            GROUP BY e.id, e.fecha, e.capacidad
-        ),
-        daily_stats AS (
-            SELECT
-                DATE(fecha) AS dia,
-                CASE
-                    WHEN SUM(capacidad) > 0 THEN (SUM(entradas) * 100.0) / SUM(capacidad)
-                    ELSE NULL
-                END AS ocupacion
-            FROM event_stats
-            GROUP BY DATE(fecha)
-        )
         SELECT
-            COUNT(*) AS eventos_mes,
-            COALESCE(SUM(entradas), 0) AS entradas_mes,
-            COALESCE(SUM(total), 0) AS recaudacion_mes,
-            (SELECT ROUND(AVG(ocupacion)) FROM daily_stats) AS ocupacion_promedio
+            e.id,
+            e.fecha,
+            e.capacidad,
+            COALESCE(SUM(ve.cantidad), 0) AS entradas,
+            COALESCE(SUM(ve.total), 0) AS total
+        FROM eventos e
+        LEFT JOIN ventas_entradas ve ON e.id = ve.evento_id
+        WHERE e.fecha >= :mstart::date AND e.fecha < :mend::date  -- Considera todos los eventos del mes
+        GROUP BY e.id, e.fecha, e.capacidad
+    ),
+    daily_stats AS (
+        SELECT
+            DATE(fecha) AS dia,
+            CASE
+                WHEN SUM(capacidad) > 0 THEN (SUM(entradas) * 100.0) / SUM(capacidad)
+                ELSE NULL
+            END AS ocupacion
         FROM event_stats
-    ";
+        GROUP BY DATE(fecha)
+    )
+    SELECT
+        COUNT(*) AS eventos_mes,
+        COALESCE(SUM(entradas), 0) AS entradas_mes,
+        COALESCE(SUM(total), 0) AS recaudacion_mes,
+        (SELECT ROUND(AVG(ocupacion)) FROM daily_stats) AS ocupacion_promedio
+    FROM event_stats
+";
+
+
     $st = $pdo->prepare($metricsSql);
     $st->execute([':mstart' => $monthStart, ':mend' => $monthEnd]);
     $m = $st->fetch() ?: ['eventos_mes' => 0, 'entradas_mes' => 0, 'recaudacion_mes' => 0, 'ocupacion_promedio' => 0];

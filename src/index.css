@@ -97,9 +97,12 @@ All colors MUST be HSL.
     @apply bg-background text-foreground;
   }
 
-  input[typse="date"]::-webkit-calendar-picker-indicator,
-  input[type="date"]::-moz-calendar-picker-indicator {
-    filter: invert(0.9) sepia(0.3) saturate(5) hue-rotate(260deg);
+  input[type="date"]::-webkit-calendar-picker-indicator,
+  input[type="month"]::-webkit-calendar-picker-indicator,
+  input[type="date"]::-moz-calendar-picker-indicator,
+  input[type="month"]::-moz-calendar-picker-indicator {
+    filter: invert(1);
     opacity: 1;
+    cursor: pointer;
   }
 }
