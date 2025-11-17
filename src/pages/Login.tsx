@@ -36,7 +36,7 @@ const Login = () => {
       return;
     }
 
-    // Validar formato de teléfono (Ejemplo: al menos 10 dígitos)
+    // Validar formato de teléfono
     const phonePattern = /^[0-9]{10,}$/;
     if (!phonePattern.test(telefono)) {
       toast.error("Por favor ingresa un teléfono válido");
@@ -55,7 +55,6 @@ const Login = () => {
       const destination = ensureAllowedRoute(from, roleSlug);
       navigate(destination, { replace: true });
     } catch (error) {
-      // Asegúrate de capturar un error si es una cadena o cualquier tipo
       const message =
         error instanceof Error ? error.message : "No se pudo iniciar sesión";
       toast.error(message);
@@ -77,7 +76,7 @@ const Login = () => {
     <AuthLayout
       title="Iniciar sesión"
       subtitle="Administrá Santas Club con seguridad"
-      footer={null} // 👈 SIN REGISTRO
+      footer={null}
     >
       <form className="space-y-5" onSubmit={handleSubmit}>
         <div className="space-y-2">

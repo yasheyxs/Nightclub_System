@@ -22,6 +22,9 @@ export interface SaveUserPayload {
   email?: string | null;
   rolId: number;
   activo: boolean;
+  password?: string;
+  currentPassword?: string;
+  newPassword?: string;
 }
 
 const toNumber = (value: unknown): number => {
@@ -79,14 +82,30 @@ const normalizeUser = (user: unknown): User => {
   };
 };
 
-const serializePayload = (payload: SaveUserPayload) => ({
-  nombre: payload.nombre,
-  telefono: payload.telefono,
-  email: payload.email ?? null,
-  rolId: payload.rolId,
-  rol_id: payload.rolId,
-  activo: payload.activo,
-});
+const serializePayload = (payload: SaveUserPayload) => {
+  const body: Record<string, unknown> = {
+    nombre: payload.nombre,
+    telefono: payload.telefono,
+    email: payload.email ?? null,
+    rolId: payload.rolId,
+    rol_id: payload.rolId,
+    activo: payload.activo,
+  };
+
+  if (payload.password) {
+    body.password = payload.password;
+  }
+
+  if (payload.currentPassword) {
+    body.currentPassword = payload.currentPassword;
+  }
+
+  if (payload.newPassword) {
+    body.newPassword = payload.newPassword;
+  }
+
+  return body;
+};
 
 export const listRoles = async (): Promise<Role[]> => {
   const { data } = await api.get("/roles.php");
@@ -115,6 +134,10 @@ export const updateUser = async (
   return normalizeUser(data);
 };
 
-export const deleteUser = async (id: number): Promise<void> => {
-  await api.delete(`/usuarios.php?id=${id}`); // pasa id como query
+export const deleteUser = async (
+  id: number,
+  options?: { password?: string }
+): Promise<void> => {
+  const data = options?.password ? { password: options.password } : undefined;
+  await api.delete(`/usuarios.php?id=${id}`, { data });
 };
