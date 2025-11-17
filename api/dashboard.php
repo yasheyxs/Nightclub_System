@@ -320,14 +320,20 @@ try {
     $where = implode(' AND ', $whereParts);
 
     $pastSql = "
-        SELECT e.id, e.nombre AS name, TO_CHAR(e.fecha, 'YYYY-MM-DD HH24:MI:SS') AS date_text,
-               COALESCE(SUM(ve.cantidad),0) AS entradas_vendidas,
-               COALESCE(SUM(ve.total),0) AS recaudacion,
-               ROUND((COALESCE(SUM(ve.cantidad),0)*100.0)/NULLIF(e.capacidad,0)) AS ocupacion
+        SELECT e.id,
+               e.nombre AS name,
+               TO_CHAR(e.fecha, 'YYYY-MM-DD HH24:MI:SS') AS date_text,
+               COALESCE(ce.total_vendido, COALESCE(SUM(ve.cantidad),0)) AS entradas_vendidas,
+               COALESCE(ce.total_monto, COALESCE(SUM(ve.total),0)) AS recaudacion,
+               COALESCE(
+                    ce.porcentaje,
+                    ROUND((COALESCE(SUM(ve.cantidad),0)*100.0)/NULLIF(e.capacidad,0))
+               ) AS ocupacion
         FROM eventos e
         LEFT JOIN ventas_entradas ve ON ve.evento_id = e.id
+        LEFT JOIN cierres_eventos ce ON ce.evento_id = e.id
         WHERE $where
-        GROUP BY e.id, e.nombre, e.fecha, e.capacidad
+        GROUP BY e.id, e.nombre, e.fecha, e.capacidad, ce.total_vendido, ce.total_monto, ce.porcentaje
         ORDER BY e.fecha DESC
     ";
     $pst = $pdo->prepare($pastSql);

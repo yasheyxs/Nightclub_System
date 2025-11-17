@@ -53,6 +53,7 @@ try {
                 ) AS invitados
             FROM usuarios u
             LEFT JOIN listas l ON l.usuario_id = u.id
+            WHERE u.activo = TRUE
             GROUP BY u.id
             ORDER BY u.id;
         ";
@@ -60,7 +61,7 @@ try {
         $stmt = $conn->query($sql);
         $result = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        // ✅ Aseguramos que "invitados" sea array real
+        // Aseguramos que "invitados" sea array real
         foreach ($result as &$row) {
             if (is_string($row['invitados'])) {
                 $decoded = json_decode($row['invitados'], true);
@@ -81,6 +82,32 @@ try {
         if (!isset($input['usuario_id']) || !isset($input['nombre_persona'])) {
             http_response_code(400);
             echo json_encode(["error" => "Campos obligatorios faltantes."]);
+            exit;
+        }
+
+        $userStmt = $conn->prepare("SELECT activo FROM usuarios WHERE id = :id LIMIT 1");
+        $userStmt->execute([':id' => $input['usuario_id']]);
+        $usuario = $userStmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$usuario) {
+            http_response_code(404);
+            echo json_encode(["error" => "El usuario especificado no existe."]);
+            exit;
+        }
+
+        $rawActivo = $usuario['activo'] ?? null;
+        $isActive = false;
+        if (is_bool($rawActivo)) {
+            $isActive = $rawActivo;
+        } elseif (is_numeric($rawActivo)) {
+            $isActive = ((int) $rawActivo) === 1;
+        } elseif (is_string($rawActivo)) {
+            $isActive = in_array(strtolower($rawActivo), ['t', 'true', '1', 'yes', 'on'], true);
+        }
+
+        if (!$isActive) {
+            http_response_code(403);
+            echo json_encode(["error" => "El usuario está inactivo y no puede gestionar listas."]);
             exit;
         }
 
