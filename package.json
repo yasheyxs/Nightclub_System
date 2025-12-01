@@ -9,7 +9,8 @@
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "preview": "vite preview",
-    "print:sample": "node src/lib/printing/runSampleTicket.js"
+    "print:sample": "node src/lib/printing/runSampleTicket.js",
+    "print:server": "node server.js"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

@@ -1,37 +1,99 @@
-// server.js
+import express from "express";
+import bodyParser from "body-parser";
+import escpos from "escpos";
+import { randomBytes } from "crypto";
+import { printTicket } from "./src/lib/printing/printEscposTicket.js";
 
-const express = require("express");
-const escpos = require("escpos");
-const bodyParser = require("body-parser");
+// Ensure ESC/POS adapters exist for both USB and network printers.
+escpos.USB = escpos.USB || escpos.Adapter?.USB;
+escpos.Network = escpos.Network || escpos.Adapter?.Network;
 
 const app = express();
-const port = 3000; // Puedes elegir el puerto que desees
+const port = Number(process.env.PRINT_SERVER_PORT) || 4000;
 
-// Configuración del body parser para que acepte datos JSON
-app.use(bodyParser.json());
+app.use(bodyParser.json({ limit: "1mb" }));
 
-// Dirección de la impresora en red (reemplázalo con la IP de tu impresora)
-new escpos.Printer(new escpos.USB());
+function toNumberOrUndefined(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
 
-// Ruta para recibir la solicitud de impresión
-app.post("/imprimir", (req, res) => {
-  const { tipo, cantidad, precio, total, fecha, hora } = req.body;
+function buildPrinterDevice() {
+  const networkHost = process.env.PRINTER_NETWORK_HOST;
+  const networkPort =
+    toNumberOrUndefined(process.env.PRINTER_NETWORK_PORT) || 9100;
 
-  const ticketContent = `
-    Tipo: ${tipo}
-    Cantidad: ${cantidad}
-    Precio: ${precio}
-    Total: ${total}
-    Fecha: ${fecha}
-    Hora: ${hora}
-  `;
+  if (networkHost) {
+    if (!escpos.Network) {
+      throw new Error("El adaptador de red de escpos no está disponible");
+    }
 
-  // Enviar la información a la impresora
-  printer.text(ticketContent).cut().close();
+    return new escpos.Network(networkHost, networkPort);
+  }
 
-  res.send({ message: "Ticket enviado a la impresora" });
+  const vendorId = toNumberOrUndefined(process.env.PRINTER_VENDOR_ID);
+  const productId = toNumberOrUndefined(process.env.PRINTER_PRODUCT_ID);
+
+  if (!escpos.USB) {
+    throw new Error("El adaptador USB de escpos no está disponible");
+  }
+
+  return vendorId && productId
+    ? new escpos.USB(vendorId, productId)
+    : new escpos.USB();
+}
+
+function buildControlCode(preferredCode) {
+  if (preferredCode) return preferredCode;
+  const randomSuffix = randomBytes(3).toString("hex");
+  return `CTRL-${randomSuffix}`.toUpperCase();
+}
+
+app.post("/imprimir", async (req, res) => {
+  const { tipo, id, fecha, hora, tragoGratis, nota, controlCode } =
+    req.body || {};
+
+  if (!tipo || !fecha || !hora) {
+    return res.status(400).json({
+      message:
+        "Faltan campos obligatorios para imprimir el ticket (tipo, fecha, hora)",
+    });
+  }
+
+  const payload = {
+    tipo,
+    id,
+    fecha,
+    hora,
+    tragoGratis: tragoGratis ?? undefined,
+    nota,
+  };
+
+  try {
+    const device = buildPrinterDevice();
+    await printTicket(payload, buildControlCode(controlCode), device);
+
+    return res.json({
+      message: "Ticket enviado a la impresora",
+      payload,
+    });
+  } catch (error) {
+    console.error("No se pudo imprimir el ticket:", error);
+    return res.status(500).json({
+      message: "No se pudo imprimir el ticket",
+      error: error.message,
+    });
+  }
 });
 
-app.listen(port, () => {
-  console.log(`Servidor escuchando en http://localhost:${port}`);
+app.get("/salud", (_req, res) => {
+  res.json({ status: "ok", printer: Boolean(escpos.USB || escpos.Network) });
 });
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  app.listen(port, () => {
+    console.log(`Servidor de impresión escuchando en http://localhost:${port}`);
+  });
+}
+
+export default app;
