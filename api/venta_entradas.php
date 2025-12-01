@@ -11,6 +11,62 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 date_default_timezone_set('America/Argentina/Cordoba');
 
+function generarContenidoTicket(string $tipoEntrada, float $monto): string
+{
+    $linea = str_repeat('-', 32);
+    $fecha = date('d/m/Y H:i');
+    $montoFormateado = '$' . number_format($monto, 2, '.', ',');
+
+    return implode("\n", [
+        'SANTAS',
+        $linea,
+        'Tipo de entrada: ' . $tipoEntrada,
+        'Fecha y hora: ' . $fecha,
+        'Total de la venta: ' . $montoFormateado,
+        $linea,
+        ''
+    ]);
+}
+
+function enviarAImpresora(string $contenido): void
+{
+    $archivoTemporal = tempnam(sys_get_temp_dir(), 'ticket_');
+
+    if ($archivoTemporal === false || file_put_contents($archivoTemporal, $contenido) === false) {
+        throw new RuntimeException('No se pudo generar el archivo del ticket.');
+    }
+
+    $salida = [];
+    $codigo = 0;
+
+    if (stripos(PHP_OS_FAMILY, 'Windows') !== false) {
+        $comando = 'powershell -Command "try { Get-Content -Path ' . escapeshellarg($archivoTemporal) . ' | Out-Printer; exit 0 } catch { Write-Error $_; exit 1 }"';
+    } else {
+        $comando = 'lpr ' . escapeshellarg($archivoTemporal);
+    }
+
+    exec($comando, $salida, $codigo);
+
+    @unlink($archivoTemporal);
+
+    if ($codigo !== 0) {
+        $mensajeSalida = trim(implode("\n", $salida));
+        throw new RuntimeException('Error al enviar el ticket a la impresora. ' . $mensajeSalida);
+    }
+}
+
+function imprimirTickets(string $tipoEntrada, float $montoUnitario, int $cantidad): void
+{
+    if ($cantidad <= 0) {
+        return;
+    }
+
+    for ($i = 0; $i < $cantidad; $i++) {
+        $contenido = generarContenidoTicket($tipoEntrada, $montoUnitario);
+        enviarAImpresora($contenido);
+    }
+}
+
 $host = "aws-1-us-east-2.pooler.supabase.com";
 $port = "5432";
 $dbname = "postgres";
@@ -201,8 +257,8 @@ try {
             }
         }
 
-        // Obtener precio base de la entrada
-        $entradaStmt = $pdo->prepare("SELECT precio_base FROM entradas WHERE id = :id AND activo = true");
+        // Obtener datos de la entrada
+        $entradaStmt = $pdo->prepare("SELECT nombre, precio_base FROM entradas WHERE id = :id AND activo = true");
         $entradaStmt->execute([':id' => $entradaId]);
         $entrada = $entradaStmt->fetch();
 
@@ -212,6 +268,7 @@ try {
             exit;
         }
 
+        $nombreEntrada = $entrada['nombre'] ?? 'Entrada';
         $precioUnitario = (float)$entrada['precio_base'];
 
         // Insertar venta
@@ -235,6 +292,22 @@ try {
 
         $controlCode = 'SC-' . $venta['id'] . '-' . substr((string)round(microtime(true) * 1000), -6);
 
+        $ticketsImpresos = 0;
+
+        if ($venta['cantidad'] > 0) {
+            try {
+                imprimirTickets($nombreEntrada, $precioUnitario, (int)$venta['cantidad']);
+                $ticketsImpresos = (int)$venta['cantidad'];
+            } catch (Throwable $e) {
+                http_response_code(500);
+                echo json_encode([
+                    'error' => 'La venta fue registrada pero no se pudieron imprimir los tickets: ' . $e->getMessage(),
+                    'id_venta' => (int)$venta['id']
+                ], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+        }
+
         echo json_encode([
             'id' => (int)$venta['id'],
             'id_venta' => (int)$venta['id'],
@@ -245,7 +318,11 @@ try {
             'incluye_trago' => (bool)$venta['incluye_trago'],
             'fecha_venta' => $venta['fecha_venta'],
             'total' => (float)$venta['total'],
-            'control_code' => $controlCode
+            'control_code' => $controlCode,
+            'tickets_impresos' => $ticketsImpresos,
+            'mensaje' => $ticketsImpresos > 0
+                ? 'Tickets enviados a la impresora predeterminada.'
+                : 'No se generaron tickets para esta operación.'
         ], JSON_UNESCAPED_UNICODE);
         exit;
     }
@@ -258,5 +335,10 @@ try {
     echo json_encode([
         'error' => $e->getMessage(),
         'trace' => $e->getTraceAsString()
+    ]);
+} catch (Throwable $e) {
+    http_response_code(500);
+    echo json_encode([
+        'error' => 'Error inesperado: ' . $e->getMessage()
     ]);
 }
