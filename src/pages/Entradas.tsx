@@ -89,6 +89,15 @@ export default function Entradas() {
   );
   const [closingEvent, setClosingEvent] = useState<boolean>(false);
 
+  const [printerName, setPrinterName] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("santas_printer_name") ?? "";
+  });
+  const [ticketFilePath, setTicketFilePath] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("santas_ticket_file_path") ?? "";
+  });
+
   const numberFormatter = useMemo(
     () => new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }),
     []
@@ -103,6 +112,40 @@ export default function Entradas() {
       }),
     []
   );
+
+  const printServiceUrl = useMemo(() => {
+    const envUrl = import.meta.env.VITE_PRINT_SERVICE_URL;
+    if (envUrl && envUrl.trim()) {
+      return envUrl.trim();
+    }
+
+    const apiBase = import.meta.env.VITE_API_BASE_URL;
+    if (apiBase) {
+      try {
+        const url = new URL(apiBase);
+        const cleanedPath = url.pathname.replace(/\/api\/?$/, "");
+        url.pathname = `${cleanedPath.replace(/\/$/, "")}/print`;
+        return url.toString();
+      } catch (error) {
+        console.warn(
+          "No se pudo normalizar VITE_API_BASE_URL para impresión",
+          error
+        );
+      }
+    }
+
+    return "/print";
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("santas_printer_name", printerName);
+  }, [printerName]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("santas_ticket_file_path", ticketFilePath);
+  }, [ticketFilePath]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -291,6 +334,54 @@ export default function Entradas() {
     setTipoOperacion("venta");
   };
 
+  const enviarImpresion = async (rutaArchivo: string) => {
+    if (!printerName.trim() || !rutaArchivo.trim()) {
+      toast({
+        title: "Faltan datos para imprimir",
+        description:
+          "Ingresá el nombre de la impresora y la ruta completa del archivo.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      const response = await fetch(printServiceUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          printerName: printerName.trim(),
+          filePath: rutaArchivo.trim(),
+        }),
+      });
+
+      const result = await response.json().catch(() => ({}));
+      const message =
+        typeof result?.message === "string"
+          ? result.message
+          : "El trabajo de impresión se envió.";
+
+      if (response.ok) {
+        toast({
+          title: "Enviando a impresión",
+          description: message,
+        });
+      } else {
+        throw new Error(message);
+      }
+    } catch (error) {
+      console.error("Error al imprimir:", error);
+      toast({
+        title: "No se pudo imprimir",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Ocurrió un error inesperado al enviar la impresión.",
+        variant: "destructive",
+      });
+    }
+  };
+
   const registrarVenta = async () => {
     if (!selectedEvent || sellingEntradaId === null) {
       toast({
@@ -385,6 +476,18 @@ export default function Entradas() {
           tipoOperacion === "resta" ? "restadas" : "registradas"
         } correctamente.`,
       });
+
+      if (tipoOperacion === "venta") {
+        if (ticketFilePath.trim()) {
+          await enviarImpresion(ticketFilePath.trim());
+        } else {
+          toast({
+            title: "Venta registrada",
+            description:
+              "Cargá la ruta del archivo para enviar el ticket a impresión automáticamente.",
+          });
+        }
+      }
 
       cerrarVenta();
     } catch (error) {
@@ -700,6 +803,35 @@ export default function Entradas() {
                   }
                 />
                 <Label htmlFor="incluye-trago">Incluye trago gratis</Label>
+              </div>
+            )}
+            {tipoOperacion === "venta" && (
+              <div className="grid gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="printer-name">
+                    Impresora (cola de Windows)
+                  </Label>
+                  <Input
+                    id="printer-name"
+                    placeholder="Nombre configurado en la cola de impresión"
+                    value={printerName}
+                    onChange={(event) => setPrinterName(event.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="ticket-path">
+                    Ruta del archivo a imprimir
+                  </Label>
+                  <Input
+                    id="ticket-path"
+                    placeholder="C:\\ruta\\al\\archivo.pdf"
+                    value={ticketFilePath}
+                    onChange={(event) => setTicketFilePath(event.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Se enviará a imprimir automáticamente al confirmar la venta.
+                  </p>
+                </div>
               </div>
             )}
             <div className="rounded-md border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
