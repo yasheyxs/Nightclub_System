@@ -1,5 +1,6 @@
-import { QZ } from "qz-tray-types";
+import * as qz from "qz-tray";  // Importa QZ Tray correctamente
 
+// Definición de la interfaz para el ticket
 export interface TicketPayload {
   tipo: string;
   id: number | string;
@@ -9,7 +10,8 @@ export interface TicketPayload {
 
 const THERMAL_PRINTER = "Xprinter XPE200L";
 
-const ensureQzLoaded = (): QZ => {
+// Verificar si QZ Tray está cargado
+const ensureQzLoaded = (): qz.QZ => {
   if (typeof window === "undefined" || !window.qz) {
     throw new Error("QZ Tray no está disponible. Verificá la instalación.");
   }
@@ -17,6 +19,7 @@ const ensureQzLoaded = (): QZ => {
   return window.qz;
 };
 
+// Conectar a la impresora
 export const connectPrinter = async (): Promise<void> => {
   const qz = ensureQzLoaded();
 
@@ -33,44 +36,51 @@ export const connectPrinter = async (): Promise<void> => {
   }
 };
 
-
+// Generar los comandos para imprimir el ticket
 const buildTicketCommands = (payload: TicketPayload): string[] => {
   const controlCode = `SC-${payload.id}-${String(Date.now()).slice(-6)}`;
 
   return [
-    "\x1B\x40",
-    "\x1B\x61\x01",
-    "\x1B\x45\x01",
-    "SANTAS\n",
-    "\x1B\x45\x00",
-    "ENTRADA DIGITAL\n",
-    "\x1B\x61\x00",
-    "---------------------------\n",
-    `Tipo: ${payload.tipo}\n`,
-    `Ticket ID: ${payload.id}\n`,
-    `Fecha: ${payload.fecha}\n`,
-    `Hora: ${payload.hora}\n`,
-    "---------------------------\n",
-    "NO COMPARTIR ESTE TICKET\n",
-    `Codigo: ${controlCode}\n`,
-    "---------------------------\n",
-    "\x1B\x61\x01",
-    "Gracias por tu compra\n\n",
-    "\x1B\x61\x00",
-    "\x1D\x56\x00",
+    "\x1B\x40",  // Inicializa la impresora
+    "\x1B\x61\x01",  // Centra el texto
+    "\x1B\x45\x01",  // Activa negrita
+    "SANTAS\n",  // Nombre del evento
+    "\x1B\x45\x00",  // Desactiva negrita
+    "ENTRADA DIGITAL\n",  // Tipo de entrada
+    "\x1B\x61\x00",  // Alineación izquierda
+    "---------------------------\n",  // Separador
+    `Tipo: ${payload.tipo}\n`,  // Tipo de ticket
+    `Ticket ID: ${payload.id}\n`,  // ID del ticket
+    `Fecha: ${payload.fecha}\n`,  // Fecha
+    `Hora: ${payload.hora}\n`,  // Hora
+    "---------------------------\n",  // Separador
+    "NO COMPARTIR ESTE TICKET\n",  // Mensaje
+    `Codigo: ${controlCode}\n`,  // Código de control
+    "---------------------------\n",  // Separador
+    "\x1B\x61\x01",  // Centra el texto
+    "Gracias por tu compra\n\n",  // Agradecimiento
+    "\x1B\x61\x00",  // Alineación izquierda
+    "\x1D\x56\x00",  // Corte de papel
   ];
 };
 
 export const printTicket = async (payload: TicketPayload): Promise<void> => {
   const qz = ensureQzLoaded();
-  await connectPrinter();
+  try {
+    await connectPrinter();
 
-  const config = qz.configs.create(THERMAL_PRINTER, {
-    altPrinting: true,
-    encoding: "CP1252",
-  });
+    const config = qz.configs.create(THERMAL_PRINTER, {
+      altPrinting: true,
+      encoding: "CP1252",  // Asegura la codificación correcta
+    });
 
-  const commands = buildTicketCommands(payload);
+    const commands = buildTicketCommands(payload);  // Construye los comandos para el ticket
 
-  await qz.print(config, commands);
+    await qz.print(config, commands);  // Envía los comandos a la impresora
+    console.log("Ticket impreso exitosamente");
+  } catch (error) {
+    console.error("Error al imprimir el ticket: ", error);
+  }
 };
+
+

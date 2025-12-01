@@ -22,8 +22,7 @@ declare module "qz-tray-types" {
 
 declare global {
   interface Window {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    qz?: any;
+    qz?: QZ;
   }
 }
 

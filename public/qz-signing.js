@@ -1,94 +1,107 @@
-// Global scope definition
-const certificate = `-----BEGIN CERTIFICATE-----
-MIIDVzCCAj+gAwIBAgIUGwixoN3LVoqLJM+VbRquhbzRoRwwDQYJKoZIhvcNAQEL
-BQAwOzELMAkGA1UEBhMCQVIxEDAOBgNVBAgMB0NvcmRvYmExGjAYBgNVBAcMEVZp
-bGxhIGRlbCBSb3NhcmlvMB4XDTI1MTIwMTA0MzgzMVoXDTI2MTIwMTA0MzgzMVow
-OzELMAkGA1UEBhMCQVIxEDAOBgNVBAgMB0NvcmRvYmExGjAYBgNVBAcMEVZpbGxh
-IGRlbCBSb3NhcmlvMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwV7S
-PM76sHCtdnRCPrgO/OHqwWtuLWgD5ViNK0SJQDwx/SqDjghwqrepHwZ5ILdMwMw/
-Haq35Y+775CeJFhb00GZRGdORHsqFKRPJyr5ANGxogdkaADCZCtCRHi5kGh++dJ5
-EP1WY/ebnw1cAiZV4m8LApJCOgOSoDeNdUKaYcOAHQC67+Ozm62ejplWOJrSA45X
-EY72RUm1oMp3DjvcvVR2ySdrIMtR8f0sDTbMNrrTa6INpPCq3bsJgAjUZo2jAQ6p
-Ne87R2v1MG6d+v03QKVd05m9tsnhOpUIHafDgLn4w5DliGuQ2COW2o9jeZ6IA2lv
-60RsSOdkOIntQTpwKwIDAQABo1MwUTAdBgNVHQ4EFgQUnRknqPbetcARB+Olj4h3
-0fkwt84wHwYDVR0jBBgwFoAUnRknqPbetcARB+Olj4h30fkwt84wDwYDVR0TAQH/
-BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEAYPwqTpR8/iJ0349vSwRstCfEKiL2
-37jHCOMxYizwKg1X7J8CxVpk2WM1bVG9qMIg6bbgUBEYzf30UMMSYOTQ74KMvUMn
-4VUJvtro3veIvIZJMlBP1ZVKTV68orbtPY6LEahpq8+O4UjcYNjBLppE+eypC/JZ
-Zd4Sho5lHO4mInPlLfcJtLXhS1lZz7cjiTLgGdLrkM/QwCBKOxq0fd2i+DQ9fR9y
-TqngJiFIFtR/VWOnFXoCOkqZBXd/UuKsCfaC0IhSNeiORVb+roO8NZ7QUyNAiyqo
-llQ+SUUQBjTs+WrbHHHO+W1eQ3LzRVlO67Z40xaxc8bWvuM6jeMGaQMOEg==
+// Certificado y clave privada por defecto (solo para propósitos de prueba)
+const DEFAULT_CERTIFICATE = `-----BEGIN CERTIFICATE-----
+MIIECzCCAvOgAwIBAgIGAZranflvMA0GCSqGSIb3DQEBCwUAMIGiMQswCQYDVQQG
+EwJVUzELMAkGA1UECAwCTlkxEjAQBgNVBAcMCUNhbmFzdG90YTEbMBkGA1UECgwS
+UVogSW5kdXN0cmllcywgTExDMRswGQYDVQQLDBJRWiBJbmR1c3RyaWVzLCBMTEMx
+HDAaBgkqhkiG9w0BCQEWDXN1cHBvcnRAcXouaW8xGjAYBgNVBAMMEVFaIFRyYXkg
+RGVtbyBDZXJ0MB4XDTI1MTEzMDE1NTI1N1oXDTQ1MTEzMDE1NTI1N1owgaIxCzAJ
+BgNVBAYTAlVTMQswCQYDVQQIDAJOWTESMBAGA1UEBwwJQ2FuYXN0b3RhMRswGQYD
+VQQKDBJRWiBJbmR1c3RyaWVzLCBMTEMxGzAZBgNVBAsMElFaIEluZHVzdHJpZXMs
+IExMQzEcMBoGCSqGSIb3DQEJARYNc3VwcG9ydEBxei5pbzEaMBgGA1UEAwwRUVog
+VHJheSBEZW1vIENlcnQwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDD
+IV2cCHDo+kH5HjClQBT2Akawx1FC/weuwTijjrObI9gAY9quYK1okcjKTyHX9vw/
+/7YSAXG/GkisRWmbq4f12TWT/xSm/J7onnnjq+F3GWcozixckbYbQjpjROhkI4LO
+YXnw5S0IVRr1BRKVugXTHEgiea0N6H7ydJ/tD3bNYyYfZ5WkmqlnKO4HO4ky3DVn
+1Xh0etlkChtaye1N13gugWZshxcj2Tbm/3Th6JmToDzWyIWnK2MZShDAX32IPSV6
+5VnYhpDFIaqzHcLa2I8FClmW/16TEZVf2hFoYMT0Kl5WgWkiH/RsP2f7abmnOZpA
+ByKG9X1zG3FhPGEZkwsPAgMBAAGjRTBDMBIGA1UdEwEB/wQIMAYBAf8CAQEwDgYD
+VR0PAQH/BAQDAgEGMB0GA1UdDgQWBBRQP8KTE9lKsQwyc4mltz7BVUAq2zANBgkq
+hkiG9w0BAQsFAAOCAQEAK4gPBSaRnhWodqu5g9zFzEU5bBt9IwfHEUDsO2jFeJ3n
+uCj75GuZxzvmjItJ7XnpuXCl721AfGDWCYVXwi9S3yIw8E1oczTPZHeLrybhw9UH
+sth/NTzryx/Ip/0KLd2l2JCd9k8LmCVPyh+Z/HwBCMIKJmQjk7IIAmvvdURaP0xY
+w0PZRfBHiUHrZfwDihw4UkusnMrjjDEfvraZ+RnmCqMebHRUP8sigAuGZwz82dJq
+sQ+rab61wtaRfupoWa/aXeTAzzfO59mU7+dxvsfsbxctsZJotxMqemEQMObP3yUT
+5YhgkQkDn5u9h9wAQ6mDsZzjvP41sMGaDSFhiz9l6g==
 -----END CERTIFICATE-----`;
 
-const privateKey = `-----BEGIN PRIVATE KEY-----
-MIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSlAgEAAoIBAQDBXtI8zvqwcK12
-dEI+uA784erBa24taAPlWI0rRIlAPDH9KoOOCHCqt6kfBnkgt0zAzD8dqrflj7vv
-kJ4kWFvTQZlEZ05EeyoUpE8nKvkA0bGiB2RoAMJkK0JEeLmQaH750nkQ/VZj95uf
-DVwCJlXibwsCkkI6A5KgN411Qpphw4AdALrv47ObrZ6OmVY4mtIDjlcRjvZFSbWg
-yncOO9y9VHbJJ2sgy1Hx/SwNNsw2utNrog2k8KrduwmACNRmjaMBDqk17ztHa/Uw
-bp36/TdApV3Tmb22yeE6lQgdp8OAufjDkOWIa5DYI5baj2N5nogDaW/rRGxI52Q4
-ie1BOnArAgMBAAECggEAAz7n7JJAgUmVc6GCaqrZRyeGqHdFr5A5/kYxeV/ZP1zk
-k/25c8+MN3cfFxPd0VfsiqWESYjAkWC0c8f3NLICqipZmB+852uFgEzgnxXiVFSX
-IXbAnuV7uftsOPh7Y0rwSjNdIMg8nefnywEPKWI8YpKRYfuL2wgSexBL96xDXMzx
-Hlsx5t7i8VdP7Dt4ksTY9FovWiVJj6fp6Xf3g+fgQnOHLuyesUyv7Tnbon+Zp8Uz
-uhw/0By3rQtCYgn/cuPYRis2OFUhTfsE0WAlluxbQ1WJSa1N59g5ULSpbbrH9i8X
-eZnM/tZsEU/tzPqmr224UHEEnUibLFMqGQuSPyyV4QKBgQDlFpEaVHKh7xobnpbn
-mwWtbDRw0QuOdoe/WixxoOfho22ehWrvi6nJ/RcmXC1sI9zPNxzzMfWgb4+9ByYn
-mJJpavN8dEySe6EELku6c2R3tTc1gojYTWXpP0mDeNf1MirVGmbJtD/cp0fHLGCt
-RophOxkXT2mJ0dkpfvXBCVH92wKBgQDYFhqr5u3XJyQeDYnO1xPyKm8qC5Czk1KN
-kzqDrvKN4UBlcDGx0yQrLYlbqwPY6t9vx2O/0ZxpJYUj+ZCWr2iCPO1Laeva0G19
-wgtfqghydzieJM4B6utpOsuabaLxw0KGG3VVZ2APStJRZpFGw7eGKz6ScGWgr9W6
-swvtUpHv8QKBgQDe7AfFBFoMI9xW9grIUzzCFiItie5h8guEc939sGMUWXDJKfD2
-KwTMrkCBrn7w1TEAXxQHvxzSwtyvR66kJz6J4G4RNCZzAGSd6eL9C16/chLIOj6p
-pR8/SrtheQ1E501w02EkdAcU057wPMnSs2ri1JxE55y+ZPqZ+5ZvAn/LswKBgQCz
-eKhuXj7sk/XLgDMVOE24tMXfhfuJKrNGIyJWfNe4P33cwnKD33oK4qdTG5b2cx1h
-GZofl1jxe9g5KO6OOOH0SeZM3IyoELTf3mrT6cVaTOsZbjgsH5GmtM6mVKkhY6u8
-9tFdPZ7rFJnaQfYncCbdqM0vk2rVKzW4+zzMv+e2AQKBgQC9pnXQ+GGsSdQeiFPq
-vkvaXOFREPuNOBY2GwB+/9wNGkuPVMxFTHVPfCb3htcPekQJCGAH7vAF8gCxNqbN
-ero0JM1uRm9CQYCC3jXWCY/M0H++XzznbH9I43iLH9Xr8oxPjf0FNXcDJR1bMvIz
-eeyhXjqFO5uyHX3ktciJDfFG6g==
+const DEFAULT_PRIVATE_KEY = `-----BEGIN PRIVATE KEY-----
+MIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDDIV2cCHDo+kH5
+HjClQBT2Akawx1FC/weuwTijjrObI9gAY9quYK1okcjKTyHX9vw//7YSAXG/Gkis
+RWmbq4f12TWT/xSm/J7onnnjq+F3GWcozixckbYbQjpjROhkI4LOYXnw5S0IVRr1
+BRKVugXTHEgiea0N6H7ydJ/tD3bNYyYfZ5WkmqlnKO4HO4ky3DVn1Xh0etlkChta
+ye1N13gugWZshxcj2Tbm/3Th6JmToDzWyIWnK2MZShDAX32IPSV65VnYhpDFIaqz
+HcLa2I8FClmW/16TEZVf2hFoYMT0Kl5WgWkiH/RsP2f7abmnOZpAByKG9X1zG3Fh
+PGEZkwsPAgMBAAECggEAQfAKc+meTfwTQx1ijtTiwGbwgFg6K4uGixUcEJjuNGSe
+XzNe+EIPFyD8WvD2nMYHY5EDc34tc8hr+lrSXxpNrVQi+MnfrrX69Nxoj/jLDbX1
+2CIjd3x9ryRoGpd0eDJPx3HFBRRMbV5k55s5NoNP6JDMB2pagjKog0HJsQ/is3BP
+9bxzuIANAoYY/963uDIBYAdUnnnvBqdO+qPNM58B0Q6xWcrZ/NdIWuU2puf/SZ2N
+vpz79oe8n9KmO1tW11L8zuz0Ie7+LLFolsU/HbLaW2GwkUL+kMVJbyqsxQzXFPle
+x2lKxl+JicRMEqThuE1LsS+HGWv1RTTn+2HrGnBi4QKBgQD2KWZSH+rEySt7P/uE
+W9lKkRFDdkTgmXzJFnlBTcuBo26QF8wx7qHKFF1nf0fPChTTFFlFqNlSpnkfkbTW
+4/kXia6g8Ljmddq7Cq5ZLzyqoH2xzaD8iBN3U3D19Q/q3LNgRy+vZL6yYzC4j4L9
+ZgvwHZFak6xOyDBVGnk44qUOqQKBgQDK7dbMxD6jIvuI8znrj1hBcYTUW0hhbCEC
+/crQHoP7WfBuVbLgIAwzh/ZxZeFiXb81Ly3ofhTO0WHsMD5hh8jrZyvSJDlmY4jP
+tHt1kNw7htW2hpUEENIGyQQ9C8Tc7/60n7i4SYCb1rqCfWQ+7y+DoqpltJjjv2Zq
+QSU/JRB29wKBgEWr4Ab8e6Eo4wKmUFTc/jpJpt42OjZrmtL7ZmRiVWgizqc/5Q54
+4Rfl/a3Oa4+g5dX8W2wI50GqVnvl7I4pxhWwZVmt6FdqIfdwhXo+kWglto29ioQP
+K5tJZZ5ntxKdVrO4UjnNROAOjPqfu85mtJhIdhxx0YIWzP85V/gOxfLJAoGAOmqx
+NQ0hQvElG8141PjU3TICnOcSNQldj3Dj23mNYOQJNJny/lX7bTIsnYRIl3qJOpQ0
+UQNKlibsW4Of0Y+3JRz0HnBTHch1b+VyzOtAmto712lyqFL3QwDG+ZPTvg5Qckqw
+cEyoezQbSMkz/HH6aZiAGPseMCG/J8NNJ5pR3Q0CgYBOLk6JRdaY61rW8kKuT4WN
+QMF1OG/w6FBaRBEzPn7o1XlcLkZZZRJyc0MfH6JriB0xAwB0mvYUJKYplX7JzHna
+tGfahe213dm2eY0Eyh2wV4udlrptjdJ/LFY8tjxAIswMDJG9ba+uJE5JCBtwQIEF
+GUj5WxRhrVjFSL/W/WyI2A==
 -----END PRIVATE KEY-----`;
 
 (function () {
-  // Load Forge
+  // Cargar Forge
   function loadForge() {
     return new Promise(function (resolve, reject) {
-      if (window.forge) return resolve(window.forge);
-      const s = document.createElement("script");
-      s.src = "https://cdnjs.cloudflare.com/ajax/libs/forge/1.3.1/forge.min.js";
-      s.onload = () => resolve(window.forge);
-      s.onerror = reject;
-      document.head.appendChild(s);
+      if (window.forge) {
+        resolve(window.forge); // Forge is already loaded
+      } else {
+        const s = document.createElement("script");
+        s.src =
+          "https://cdnjs.cloudflare.com/ajax/libs/forge/1.3.1/forge.min.js";
+        s.onload = function () {
+          resolve(window.forge); // Forge loaded successfully
+        };
+        s.onerror = function () {
+          reject(new Error("Failed to load Forge library"));
+        };
+        document.head.appendChild(s);
+      }
     });
   }
 
   async function configure() {
-    await loadForge();
-    if (!window.qz) return;
+    try {
+      const forge = await loadForge(); // Ensure forge is loaded before proceeding
+      console.log("Forge loaded:", forge); // Check in the console if Forge is loaded correctly
 
-    window.qz.security.setCertificatePromise(() =>
-      Promise.resolve(certificate)
-    );
-
-    window.qz.security.setSignaturePromise(function (data) {
-      return new Promise((resolve, reject) => {
-        try {
-          const pk = forge.pki.privateKeyFromPem(privateKey);
-          const md = forge.md.sha256.create();
-          md.update(data, "utf8");
-          const signature = forge.util.encode64(pk.sign(md));
-          console.log("Firma generada:", signature);
-          resolve(signature);
-        } catch (e) {
-          console.error("Error en el proceso de firma:", e);
-          reject(e);
-        }
-      });
-    });
+      if (window.qz) {
+        // Proceed with your signature setup here
+        window.qz.security.setSignaturePromise(function (data) {
+          return new Promise((resolve, reject) => {
+            try {
+              const pk = forge.pki.privateKeyFromPem(DEFAULT_PRIVATE_KEY);
+              const md = forge.md.sha256.create();
+              md.update(data, "utf8");
+              const signature = forge.util.encode64(pk.sign(md));
+              resolve(signature);
+            } catch (e) {
+              reject(e);
+            }
+          });
+        });
+      }
+    } catch (e) {
+      console.error("Error loading Forge:", e);
+    }
   }
 
   configure();
 })();
-
-// Now privateKey is globally accessible, so you can log it here:
-console.log(privateKey); // This should log the privateKey value without any issues
+console.log("QZ Tray Available:", window.qz);
+console.log("Certificate:", DEFAULT_CERTIFICATE);
+console.log("Private Key:", DEFAULT_PRIVATE_KEY);

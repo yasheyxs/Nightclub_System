@@ -1,4 +1,4 @@
-const QZ_SCRIPT_PATH = "/qz-tray.js";
+const QZ_SCRIPT_PATH = "./qzTray.ts";
 
 interface EntradaTicketPayload {
   eventName: string;
