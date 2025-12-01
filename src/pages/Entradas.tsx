@@ -31,6 +31,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 
 import { api } from "@/services/api";
+import { printEntradaTicket } from "@/lib/qzTray";
+
 import { connectPrinter, printTicket } from "@/lib/printTicket";
 
 interface EventOption {
@@ -388,21 +390,23 @@ export default function Entradas() {
       });
 
       if (tipoOperacion === "venta") {
-        const ventaId = data?.id_venta ?? data?.id;
         try {
-          await connectPrinter();
-          await printTicket({
-            tipo: entrada.nombre,
-            id: ventaId ?? "-",
-            fecha: new Date().toLocaleDateString(),
-            hora: new Date().toLocaleTimeString(),
+          await printEntradaTicket({
+            eventName: selectedEventData?.name ?? "Evento sin nombre",
+            ticketName: entrada.nombre,
+            quantity: cantidadAbsoluta,
+            unitPrice: entrada.precio_base,
+            includeDrink: incluyeTrago,
+            total: entrada.precio_base * cantidadAbsoluta,
           });
         } catch (error) {
-          console.error("Error al imprimir el ticket:", error);
+          console.error("No se pudo imprimir el ticket con QZ Tray:", error);
           toast({
-            title: "Ticket no impreso",
+            title: "Venta registrada, pero no se pudo imprimir",
             description:
-              "No se pudo enviar el ticket a la impresora. Revisá QZ Tray.",
+              error instanceof Error
+                ? error.message
+                : "Revisá QZ Tray, el certificado y la impresora configurada.",
             variant: "destructive",
           });
         }

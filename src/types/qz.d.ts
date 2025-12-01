@@ -19,3 +19,12 @@ declare module "qz-tray-types" {
     print(config: QZConfig, data: (string | Uint8Array)[]): Promise<void>;
   }
 }
+
+declare global {
+  interface Window {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    qz?: any;
+  }
+}
+
+export {};
