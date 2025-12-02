@@ -11,22 +11,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 date_default_timezone_set('America/Argentina/Cordoba');
 
-function generarContenidoTicket(string $tipoEntrada, float $monto): string
+function generarContenidoTicket(string $tipoEntrada, float $monto, bool $incluyeTrago): string
 {
-    $linea = str_repeat('-', 32);
+    $ancho = 80; // Ancho para impresora térmica de 80mm
+    $linea = str_repeat('-', $ancho); // Línea divisoria
     $fecha = date('d/m/Y H:i');
-    $montoFormateado = '$' . number_format($monto, 2, '.', ',');
+    $montoFormateado = '$' . number_format($monto, 2, ',', '.');
 
-    return implode("\n", [
-        'SANTAS',
-        $linea,
-        'Tipo de entrada: ' . $tipoEntrada,
-        'Fecha y hora: ' . $fecha,
-        'Total de la venta: ' . $montoFormateado,
-        $linea,
-        ''
-    ]);
+    // Convertir todo el texto a ISO-8859-1 para evitar problemas con caracteres no soportados
+    $tipoEntrada = iconv('UTF-8', 'ISO-8859-1//TRANSLIT', $tipoEntrada);
+    $fecha = iconv('UTF-8', 'ISO-8859-1//TRANSLIT', $fecha);
+    $montoFormateado = iconv('UTF-8', 'ISO-8859-1//TRANSLIT', $montoFormateado);
+    $linea = iconv('UTF-8', 'ISO-8859-1//TRANSLIT', $linea);
+
+    // Comando para resetear la impresora a los valores predeterminados
+    $resetImpresora = "\x1B\x40";  // Reset
+
+    // Ajustar line spacing al inicio para mayor visibilidad
+    $lineSpacingNormal = "\x1B\x33\x30"; // 48 dots de espaciado (ajustable)
+
+    // Comando para cambiar tamaño de fuente a más grande
+    $cambiarFuente = "\x1B\x21\x01"; // Fuente más grande
+
+    // Estructura del contenido
+    $contenido = [
+        $resetImpresora . $cambiarFuente . str_pad('SANTAS', $ancho, ' ', STR_PAD_BOTH),  // Centrado del nombre de la empresa
+        $linea,  // Línea divisoria
+        str_pad('Entrada: ' . $tipoEntrada, $ancho, ' ', STR_PAD_LEFT),  // Alineación izquierda para tipo de entrada
+        str_pad('Fecha: ' . $fecha, $ancho, ' ', STR_PAD_LEFT),  // Alineación izquierda para la fecha
+        str_pad('Total: ' . $montoFormateado, $ancho, ' ', STR_PAD_LEFT),  // Alineación izquierda para el total
+    ];
+
+    // Agregar el mensaje de "Incluye trago" si corresponde
+    if ($incluyeTrago) {
+        $contenido[] = str_pad('¡Incluye trago!', $ancho, ' ', STR_PAD_BOTH);  // Centrado del mensaje
+    }
+
+    $contenido[] = $linea;  // Línea divisoria final
+
+    // Unir todas las líneas del contenido
+    $ticket = implode("\n", $contenido);
+
+    // Agregar comandos de corte y salto de línea
+    $comandoCorte = "\n\n" . "\x1D\x56\x00";  // Comando de corte de papel
+
+    // Retornar el contenido completo del ticket
+    return $lineSpacingNormal . $ticket . $comandoCorte;
 }
+
 
 function enviarAImpresora(string $contenido): void
 {
@@ -39,10 +71,11 @@ function enviarAImpresora(string $contenido): void
     $salida = [];
     $codigo = 0;
 
+    // Usar un comando compatible con el sistema operativo
     if (stripos(PHP_OS_FAMILY, 'Windows') !== false) {
         $comando = 'powershell -Command "try { Get-Content -Path ' . escapeshellarg($archivoTemporal) . ' | Out-Printer; exit 0 } catch { Write-Error $_; exit 1 }"';
     } else {
-        $comando = 'lpr ' . escapeshellarg($archivoTemporal);
+        $comando = 'lpr ' . escapeshellarg($archivoTemporal);  // En sistemas Unix/Linux
     }
 
     exec($comando, $salida, $codigo);
@@ -55,17 +88,19 @@ function enviarAImpresora(string $contenido): void
     }
 }
 
-function imprimirTickets(string $tipoEntrada, float $montoUnitario, int $cantidad): void
+function imprimirTickets(string $tipoEntrada, float $montoUnitario, int $cantidad, bool $incluyeTrago): void
 {
     if ($cantidad <= 0) {
         return;
     }
 
     for ($i = 0; $i < $cantidad; $i++) {
-        $contenido = generarContenidoTicket($tipoEntrada, $montoUnitario);
+        // Llamar a generarContenidoTicket con 3 argumentos: tipoEntrada, montoUnitario y incluyeTrago
+        $contenido = generarContenidoTicket($tipoEntrada, $montoUnitario, $incluyeTrago);
         enviarAImpresora($contenido);
     }
 }
+
 
 $host = "aws-1-us-east-2.pooler.supabase.com";
 $port = "5432";
@@ -294,9 +329,12 @@ try {
 
         $ticketsImpresos = 0;
 
+        $incluyeTrago = $venta['incluye_trago'];
+
         if ($venta['cantidad'] > 0) {
             try {
-                imprimirTickets($nombreEntrada, $precioUnitario, (int)$venta['cantidad']);
+                // Ahora pasamos 4 argumentos: $nombreEntrada, $precioUnitario, $cantidad, $incluyeTrago
+                imprimirTickets($nombreEntrada, $precioUnitario, (int)$venta['cantidad'], $incluyeTrago);
                 $ticketsImpresos = (int)$venta['cantidad'];
             } catch (Throwable $e) {
                 http_response_code(500);

@@ -23,7 +23,14 @@ if (!existsSync(filePath)) {
 }
 
 const args = ["/c", "print", `/D:"${printerName}"`, `"${filePath}"`];
-const result = spawnSync("cmd", args, { stdio: "inherit" });
+const result = spawnSync(
+  "powershell",
+  [
+    "-Command",
+    `Start-Process -FilePath '${filePath}' -Verb PrintTo -ArgumentList '${printerName}'`,
+  ],
+  { stdio: "inherit" }
+);
 
 if (result.error) {
   console.error(
