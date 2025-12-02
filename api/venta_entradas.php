@@ -28,7 +28,8 @@ function generarContenidoTicket(string $tipoEntrada, float $monto, bool $incluye
 
     $contenido .= str_repeat("=", 15) . "\n\n";  // Línea inferior de "="
 
-    $contenido .= "Entrada: " . $tipoEntrada . "\n";  // Entrada al lado de "Entrada:"
+    // Cambié aquí para mostrar el nombre de la entrada en lugar del ID
+    $contenido .= "Entrada: " . $tipoEntrada . "\n";  // Ahora muestra el nombre de la entrada
     $contenido .= "Total: $" . number_format($monto, 0, ',', '.') . "\n";  // Total al lado de "Total:", sin decimales
 
     // Si incluye trago, añadir la línea correspondiente
@@ -167,8 +168,8 @@ try {
             }
         }
 
-        // Obtener precio base de la entrada
-        $entradaStmt = $pdo->prepare("SELECT precio_base FROM entradas WHERE id = :id AND activo = true");
+        // Obtener el nombre de la entrada en lugar del ID
+        $entradaStmt = $pdo->prepare("SELECT nombre, precio_base FROM entradas WHERE id = :id AND activo = true");
         $entradaStmt->execute([':id' => $entradaId]);
         $entrada = $entradaStmt->fetch();
 
@@ -178,6 +179,7 @@ try {
             exit;
         }
 
+        $nombreEntrada = $entrada['nombre'];
         $precioUnitario = (float)$entrada['precio_base'];
 
         // Insertar venta
@@ -197,8 +199,8 @@ try {
         $venta = $insert->fetch();
         $venta['total'] = (float)$venta['precio_unitario'] * (int)$venta['cantidad'];
 
-        // Imprimir el ticket de la venta
-        imprimirTickets("Venta Entrada ID: " . $venta['entrada_id'], $venta['total'], $cantidad, $incluyeTrago);
+        // Imprimir el ticket de la venta con el nombre de la entrada
+        imprimirTickets($nombreEntrada, $venta['total'], $cantidad, $incluyeTrago);
 
         echo json_encode([
             'id' => (int)$venta['id'],
