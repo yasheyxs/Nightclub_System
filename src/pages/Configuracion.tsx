@@ -26,6 +26,19 @@ interface Entrada {
   activo?: boolean;
 }
 
+const normalizeEntradaName = (name: string) =>
+  name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+const PROTECTED_ENTRADAS = ["gratis", "clasica", "anticipada"];
+
+const isProtectedEntrada = (entrada: Entrada | undefined) => {
+  if (!entrada) return false;
+  return PROTECTED_ENTRADAS.includes(normalizeEntradaName(entrada.nombre));
+};
+
 export default function Configuracion() {
   const [entradas, setEntradas] = useState<Entrada[]>([]);
   const [loading, setLoading] = useState(true);
@@ -184,6 +197,16 @@ export default function Configuracion() {
   };
 
   const handleDelete = async (id: number) => {
+    const entrada = entradas.find((item) => item.id === id);
+    if (isProtectedEntrada(entrada)) {
+      toast({
+        title: "Acción no permitida",
+        description:
+          "Las entradas gratis, clásica y anticipada no pueden eliminarse.",
+        variant: "destructive",
+      });
+      return;
+    }
     if (!window.confirm("¿Seguro que deseas eliminar esta entrada?")) return;
     try {
       await api.delete(`/entradas.php?id=${id}`);
@@ -397,6 +420,7 @@ export default function Configuracion() {
                       size="icon"
                       variant="ghost"
                       onClick={() => handleDelete(entrada.id)}
+                      disabled={isProtectedEntrada(entrada)}
                       className="h-8 w-8 text-destructive hover:bg-destructive/10"
                     >
                       <Trash2 className="h-4 w-4" />

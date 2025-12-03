@@ -41,7 +41,6 @@ interface EventOption {
 interface EntradaOption {
   id: number;
   nombre: string;
-  descripcion: string | null;
   precio_base: number;
 }
 
@@ -61,7 +60,6 @@ interface VentaEntradasResponse {
   entradas: {
     id: number;
     nombre: string;
-    descripcion: string | null;
     precio_base: number;
   }[];
   ventas: VentaResumen[];
@@ -118,12 +116,43 @@ export default function Entradas() {
           date: evento.fecha,
         }));
 
+        const normalizeName = (name: string) =>
+          name
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .toLowerCase();
+
         const mappedEntradas = data.entradas.map((entrada) => ({
           id: entrada.id,
           nombre: entrada.nombre,
-          descripcion: entrada.descripcion,
           precio_base: Number(entrada.precio_base),
         }));
+
+        const sortedEntradas = [...mappedEntradas].sort(
+          (entradaA, entradaB) => {
+            const classicalName = "clasica";
+            const aNormalized = normalizeName(entradaA.nombre);
+            const bNormalized = normalizeName(entradaB.nombre);
+
+            if (
+              aNormalized === classicalName &&
+              bNormalized !== classicalName
+            ) {
+              return -1;
+            }
+
+            if (
+              bNormalized === classicalName &&
+              aNormalized !== classicalName
+            ) {
+              return 1;
+            }
+
+            return entradaA.nombre.localeCompare(entradaB.nombre, "es", {
+              sensitivity: "base",
+            });
+          }
+        );
 
         const ventasMap: VentasPorEvento = {};
         data.ventas.forEach((venta) => {
@@ -138,7 +167,7 @@ export default function Entradas() {
         });
 
         setEvents(mappedEvents);
-        setEntradas(mappedEntradas);
+        setEntradas(sortedEntradas);
         setVentasPorEvento(ventasMap);
 
         if (mappedEvents.length > 0) {
@@ -523,7 +552,6 @@ export default function Entradas() {
             <StatCounter
               key={entrada.id}
               title={entrada.nombre}
-              subtitle={entrada.descripcion ?? undefined}
               count={currentSales[entrada.id] ?? 0}
               variant={variants[index % variants.length]}
               actionLabel="Vender entrada"
