@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "@/hooks/use-toast";
 import { api } from "@/services/api";
-import { Loader2, Printer, Search, UserRoundPlus } from "lucide-react";
+import { Loader2, Printer, Search, Trash2, UserRoundPlus } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -31,6 +31,17 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface AnticipadaResponse {
   id: number;
@@ -94,6 +105,9 @@ export default function Anticipadas() {
   const [formOpen, setFormOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [printingId, setPrintingId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<AnticipadaItem | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [formData, setFormData] = useState({
     nombre: "",
@@ -232,7 +246,7 @@ export default function Anticipadas() {
     if (!formData.nombre.trim() || !formData.entradaId) {
       toast({
         title: "Datos incompletos",
-        description: "Ingresá el nombre y seleccioná la entrada anticipada.",
+        description: "Ingresá el nombre.",
         variant: "destructive",
       });
       return;
@@ -244,7 +258,6 @@ export default function Anticipadas() {
         accion: "crear",
         nombre: formData.nombre.trim(),
         dni: formData.dni.trim(),
-        entrada_id: Number(formData.entradaId),
         evento_id: formData.eventoId ? Number(formData.eventoId) : null,
         cantidad: formData.cantidad,
         incluye_trago: formData.incluyeTrago,
@@ -273,9 +286,43 @@ export default function Anticipadas() {
     }
   };
 
-  const selectedEntrada = entradasAnticipadas.find(
-    (entrada) => String(entrada.id) === formData.entradaId
-  );
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeletingId(deleteTarget.id);
+    try {
+      await api.post("/anticipadas.php", {
+        accion: "eliminar",
+        id: deleteTarget.id,
+      });
+
+      setAnticipadas((prev) =>
+        prev.filter((anticipada) => anticipada.id !== deleteTarget.id)
+      );
+      toast({
+        title: "Registro eliminado",
+        description: "Se quitó de la lista de anticipadas.",
+      });
+      setDeleteDialogOpen(false);
+      setDeleteTarget(null);
+    } catch (error) {
+      console.error("Error al eliminar anticipada:", error);
+      toast({
+        title: "No se pudo eliminar",
+        description: "Reintentá en unos segundos.",
+        variant: "destructive",
+      });
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const selectedEntrada = entradasAnticipadas[0] ?? null;
+
+  const entradaPrice = selectedEntrada?.precio_base ?? null;
+  const totalPrice =
+    entradaPrice !== null
+      ? Math.max(1, formData.cantidad) * entradaPrice
+      : null;
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -340,31 +387,34 @@ export default function Anticipadas() {
               <div className="grid gap-4 md:grid-cols-3">
                 <div className="space-y-2 md:col-span-2">
                   <Label>Entrada anticipada</Label>
-                  <Select
-                    value={formData.entradaId}
-                    onValueChange={(value) =>
-                      setFormData({ ...formData, entradaId: value })
-                    }
-                    disabled={
-                      optionsLoading || entradasAnticipadas.length === 0
-                    }
-                  >
-                    <SelectTrigger className="h-11">
-                      <SelectValue placeholder="No hay entradas anticipadas" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {entradasAnticipadas.map((entrada) => (
-                        <SelectItem key={entrada.id} value={String(entrada.id)}>
-                          {entrada.nombre}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {selectedEntrada?.precio_base !== undefined && (
-                    <p className="text-xs text-muted-foreground">
-                      Precio actual: ${selectedEntrada.precio_base}
-                    </p>
-                  )}
+                  <div className="rounded-lg border border-border bg-muted/30 px-4 py-3">
+                    {optionsLoading ? (
+                      <p className="text-sm text-muted-foreground">
+                        Cargando opciones...
+                      </p>
+                    ) : selectedEntrada ? (
+                      <div className="space-y-1">
+                        <p className="font-semibold text-foreground">
+                          {selectedEntrada.nombre}
+                        </p>
+                        {entradaPrice !== null && (
+                          <div className="text-xs text-muted-foreground space-y-1">
+                            <p>Precio actual: ${entradaPrice}</p>
+                            {totalPrice !== null && (
+                              <p>
+                                Total por {formData.cantidad}: ${totalPrice}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        No hay una entrada anticipada configurada. Creá una en
+                        la sección de configuración.
+                      </p>
+                    )}
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="cantidad">Cantidad</Label>
@@ -438,7 +488,7 @@ export default function Anticipadas() {
                 <Button
                   className="w-full md:w-auto"
                   onClick={handleCreate}
-                  disabled={creating || optionsLoading || !formData.entradaId}
+                  disabled={creating || optionsLoading}
                 >
                   {creating ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -522,18 +572,35 @@ export default function Anticipadas() {
                       </TableCell>
                       <TableCell>{item.eventoNombre}</TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          disabled={printingId === item.id}
-                          onClick={() => handlePrint(item.id)}
-                        >
-                          {printingId === item.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Printer className="h-4 w-4" />
-                          )}
-                        </Button>
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={printingId === item.id}
+                            onClick={() => handlePrint(item.id)}
+                          >
+                            {printingId === item.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Printer className="h-4 w-4" />
+                            )}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            disabled={deletingId === item.id}
+                            onClick={() => {
+                              setDeleteTarget(item);
+                              setDeleteDialogOpen(true);
+                            }}
+                          >
+                            {deletingId === item.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-4 w-4" />
+                            )}
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -543,6 +610,40 @@ export default function Anticipadas() {
           )}
         </CardContent>
       </Card>
+      <AlertDialog
+        open={deleteDialogOpen}
+        onOpenChange={(open) => {
+          setDeleteDialogOpen(open);
+          if (!open) {
+            setDeleteTarget(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Eliminar registro</AlertDialogTitle>
+            <AlertDialogDescription>
+              ¿Estás seguro de que deseas eliminar este registro? Esta acción es
+              permanente.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingId !== null}>
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={deletingId !== null}
+            >
+              {deletingId !== null ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                "Eliminar"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

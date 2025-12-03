@@ -4,7 +4,6 @@ ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
-
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
@@ -145,29 +144,36 @@ try {
 
         if ($accion === 'crear') {
             $nombre = trim($input['nombre'] ?? '');
-            $entradaId = isset($input['entrada_id']) ? (int) $input['entrada_id'] : null;
-            $eventoId = isset($input['evento_id']) ? (int) $input['evento_id'] : null;
+            $eventoId = ($input['evento_id'] === "" || $input['evento_id'] === null)
+                ? null
+                : (int)$input['evento_id'];
             $dni = trim($input['dni'] ?? '');
             $cantidad = isset($input['cantidad']) ? max(1, (int)$input['cantidad']) : 1;
             $incluyeTrago = filter_var($input['incluye_trago'] ?? false, FILTER_VALIDATE_BOOLEAN);
 
-            if ($nombre === '' || !$entradaId) {
+            if ($nombre === '') {
                 http_response_code(400);
-                echo json_encode(['error' => 'Faltan campos obligatorios para registrar la anticipada.']);
+                echo json_encode(['error' => 'Debe indicar un nombre.']);
                 exit;
             }
 
-            // Recuperamos el precio base de la entrada para registrar la venta
-            $entradaStmt = $pdo->prepare('SELECT precio_base FROM entradas WHERE id = :id');
-            $entradaStmt->execute([':id' => $entradaId]);
+            // 🔥 BUSCAR AUTOMÁTICAMENTE LA ENTRADA "ANTICIPADA"
+            $entradaStmt = $pdo->prepare("
+                SELECT id, precio_base
+                FROM entradas
+                WHERE LOWER(nombre) = LOWER('anticipada')
+                LIMIT 1
+            ");
+            $entradaStmt->execute();
             $entradaData = $entradaStmt->fetch();
 
             if (!$entradaData) {
-                http_response_code(404);
-                echo json_encode(['error' => 'La entrada seleccionada no existe.']);
+                http_response_code(500);
+                echo json_encode(['error' => 'No existe una entrada llamada Anticipada.']);
                 exit;
             }
 
+            $entradaId = (int)$entradaData['id'];
             $precioUnitario = isset($entradaData['precio_base']) ? (float)$entradaData['precio_base'] : 0.0;
 
             $pdo->beginTransaction();
@@ -188,9 +194,12 @@ try {
                     ':incluye_trago' => $incluyeTrago,
                 ]);
 
-                $nuevoId = (int) $stmt->fetchColumn();
+                $nuevoId = (int)$stmt->fetchColumn();
 
-                $ventaStmt = $pdo->prepare('INSERT INTO ventas_entradas (entrada_id, evento_id, cantidad, precio_unitario, incluye_trago) VALUES (:entrada_id, :evento_id, :cantidad, :precio_unitario, :incluye_trago)');
+                $ventaStmt = $pdo->prepare('
+                    INSERT INTO ventas_entradas (entrada_id, evento_id, cantidad, precio_unitario, incluye_trago)
+                    VALUES (:entrada_id, :evento_id, :cantidad, :precio_unitario, :incluye_trago)
+                ');
                 $ventaStmt->bindValue(':entrada_id', $entradaId, PDO::PARAM_INT);
                 if ($eventoId === null) {
                     $ventaStmt->bindValue(':evento_id', null, PDO::PARAM_NULL);
@@ -243,12 +252,18 @@ try {
                 exit;
             } catch (Throwable $e) {
                 $pdo->rollBack();
-                throw $e;
+
+                http_response_code(500);
+                echo json_encode([
+                    'error' => 'Error interno al crear anticipada',
+                    'detalle' => $e->getMessage(),
+                ]);
+                exit;
             }
         }
 
         if ($accion === 'imprimir') {
-            $id = isset($input['id']) ? (int) $input['id'] : null;
+            $id = isset($input['id']) ? (int)$input['id'] : null;
             if (!$id) {
                 http_response_code(400);
                 echo json_encode(['error' => 'Debe indicar el ID de la anticipada.']);
@@ -283,8 +298,8 @@ try {
             }
 
             $nombreEntrada = $anticipada['entrada_nombre'] ?? 'Anticipada';
-            $precio = isset($anticipada['entrada_precio']) ? (float) $anticipada['entrada_precio'] : 0.0;
-            $cantidad = isset($anticipada['cantidad']) ? (int) $anticipada['cantidad'] : 1;
+            $precio = isset($anticipada['entrada_precio']) ? (float)$anticipada['entrada_precio'] : 0.0;
+            $cantidad = isset($anticipada['cantidad']) ? (int)$anticipada['cantidad'] : 1;
             $incluyeTrago = filter_var($anticipada['incluye_trago'], FILTER_VALIDATE_BOOLEAN);
 
             imprimirTickets($nombreEntrada, $precio, $cantidad, $incluyeTrago);
@@ -297,6 +312,32 @@ try {
                 'mensaje' => 'Ticket enviado a impresión y retirado del listado.',
                 'id_eliminado' => $id,
                 'entrada' => $nombreEntrada,
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        if ($accion === 'eliminar') {
+            $id = isset($input['id']) ? (int)$input['id'] : null;
+
+            if (!$id) {
+                http_response_code(400);
+                echo json_encode(['error' => 'Debe indicar el ID de la anticipada a eliminar.']);
+                exit;
+            }
+
+            $deleteStmt = $pdo->prepare('DELETE FROM anticipadas WHERE id = :id');
+            $deleteStmt->execute([':id' => $id]);
+
+            if ($deleteStmt->rowCount() === 0) {
+                http_response_code(404);
+                echo json_encode(['error' => 'No se encontró el registro solicitado.']);
+                exit;
+            }
+
+            echo json_encode([
+                'success' => true,
+                'mensaje' => 'Registro eliminado correctamente.',
+                'id_eliminado' => $id,
             ], JSON_UNESCAPED_UNICODE);
             exit;
         }

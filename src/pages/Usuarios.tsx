@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { isAxiosError } from "axios";
 import {
@@ -20,6 +20,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -117,7 +125,7 @@ export default function Usuarios() {
   const [userToDelete, setUserToDelete] = useState<User | null>(null);
   const [deletePassword, setDeletePassword] = useState<string>("");
   const [deleteDialogOpen, setDeleteDialogOpen] = useState<boolean>(false);
-  const formRef = useRef<HTMLDivElement | null>(null);
+  const [formDialogOpen, setFormDialogOpen] = useState<boolean>(false);
 
   const roleById = useMemo(() => {
     const map = new Map<number, string>();
@@ -301,6 +309,7 @@ export default function Usuarios() {
       }
       await refreshUsers();
       resetForm();
+      setFormDialogOpen(false);
     } catch (error) {
       toast({
         title: "Error al guardar usuario",
@@ -312,6 +321,11 @@ export default function Usuarios() {
   };
 
   const isEditingUser = editingUserId !== null;
+
+  const openCreateDialog = () => {
+    resetForm();
+    setFormDialogOpen(true);
+  };
 
   const handleEdit = (user: User) => {
     setEditingUserId(user.id);
@@ -327,7 +341,7 @@ export default function Usuarios() {
       newPassword: "",
       confirmNewPassword: "",
     });
-    formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setFormDialogOpen(true);
   };
 
   const openDeleteDialog = (user: User) => {
@@ -382,226 +396,248 @@ export default function Usuarios() {
 
   return (
     <div className="space-y-6 p-2 sm:p-4 animate-fade-in">
-      <div className="text-center sm:text-left">
-        <h1 className="text-2xl sm:text-4xl font-bold text-foreground mb-2">
-          Gestión de Usuarios
-        </h1>
-        <p className="text-sm sm:text-base text-muted-foreground">
-          Configura perfiles para administradores, cajas o promotores.
-        </p>
-      </div>
+      <Dialog
+        open={formDialogOpen}
+        onOpenChange={(open) => {
+          setFormDialogOpen(open);
+          if (!open) {
+            resetForm();
+          }
+        }}
+      >
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="text-center sm:text-left">
+            <h1 className="text-2xl sm:text-4xl font-bold text-foreground mb-2">
+              Gestión de Usuarios
+            </h1>
+            <p className="text-sm sm:text-base text-muted-foreground">
+              Configura perfiles para administradores, cajas o promotores.
+            </p>
+          </div>
+          <DialogTrigger asChild>
+            <Button
+              size="lg"
+              className="w-full sm:w-auto"
+              onClick={openCreateDialog}
+            >
+              Crear usuario
+            </Button>
+          </DialogTrigger>
+        </div>
 
-      <div ref={formRef}>
-        <Card className="border-border">
-          <CardHeader>
-            <CardTitle>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:min-w-[720px]">
+          <DialogHeader>
+            <DialogTitle>
               {isEditing ? "Editar usuario" : "Crear nuevo usuario"}
-            </CardTitle>
-            <CardDescription>
+            </DialogTitle>
+            <DialogDescription>
               {isEditing
                 ? "Actualiza los datos seleccionados."
                 : "Completa la información del nuevo usuario."}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-6">
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleSubmit} className="space-y-6 mt-4">
+            <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
+              <div className="grid gap-2">
+                <Label>Nombre completo</Label>
+                <Input
+                  value={formState.nombre}
+                  onChange={(e) =>
+                    setFormState((p) => ({ ...p, nombre: e.target.value }))
+                  }
+                  placeholder="Ingresar nombre"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label>Teléfono</Label>
+                <Input
+                  value={formState.telefono}
+                  onChange={(e) =>
+                    setFormState((p) => ({ ...p, telefono: e.target.value }))
+                  }
+                  placeholder="Ej: +54 9 11 5555-5555"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label>Correo electrónico</Label>
+                <Input
+                  type="email"
+                  value={formState.email}
+                  onChange={(e) =>
+                    setFormState((p) => ({ ...p, email: e.target.value }))
+                  }
+                  placeholder="usuario@santasclub.com"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label>Rol</Label>
+                <Select
+                  value={formState.rolId}
+                  onValueChange={(value) =>
+                    setFormState((p) => ({ ...p, rolId: value }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Seleccionar rol" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {roles.length === 0 ? (
+                      <div className="px-3 py-2 text-sm text-muted-foreground">
+                        No hay roles disponibles
+                      </div>
+                    ) : (
+                      roles.map((role) => (
+                        <SelectItem key={role.id} value={String(role.id)}>
+                          {role.nombre}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {!isEditing && (
               <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
                 <div className="grid gap-2">
-                  <Label>Nombre completo</Label>
+                  <Label>Contraseña</Label>
                   <Input
-                    value={formState.nombre}
+                    type="password"
+                    autoComplete="new-password"
+                    value={formState.password}
                     onChange={(e) =>
-                      setFormState((p) => ({ ...p, nombre: e.target.value }))
+                      setFormState((p) => ({
+                        ...p,
+                        password: e.target.value,
+                      }))
                     }
-                    placeholder="Ingresar nombre"
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label>Teléfono</Label>
-                  <Input
-                    value={formState.telefono}
-                    onChange={(e) =>
-                      setFormState((p) => ({ ...p, telefono: e.target.value }))
-                    }
-                    placeholder="Ej: +54 9 11 5555-5555"
+                    placeholder="Ingresa una contraseña segura"
                   />
                 </div>
                 <div className="grid gap-2">
                   <Label>Correo electrónico</Label>
                   <Input
-                    type="email"
-                    value={formState.email}
+                    type="password"
+                    autoComplete="new-password"
+                    value={formState.passwordConfirm}
                     onChange={(e) =>
-                      setFormState((p) => ({ ...p, email: e.target.value }))
+                      setFormState((p) => ({
+                        ...p,
+                        passwordConfirm: e.target.value,
+                      }))
                     }
-                    placeholder="usuario@santasclub.com"
+                    placeholder="Repite la contraseña"
                   />
                 </div>
-                <div className="grid gap-2">
-                  <Label>Rol</Label>
-                  <Select
-                    value={formState.rolId}
-                    onValueChange={(value) =>
-                      setFormState((p) => ({ ...p, rolId: value }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Seleccionar rol" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {roles.length === 0 ? (
-                        <div className="px-3 py-2 text-sm text-muted-foreground">
-                          No hay roles disponibles
-                        </div>
-                      ) : (
-                        roles.map((role) => (
-                          <SelectItem key={role.id} value={String(role.id)}>
-                            {role.nombre}
-                          </SelectItem>
-                        ))
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
               </div>
+            )}
 
-              {!isEditing && (
-                <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
-                  <div className="grid gap-2">
-                    <Label>Contraseña</Label>
-                    <Input
-                      type="password"
-                      autoComplete="new-password"
-                      value={formState.password}
-                      onChange={(e) =>
-                        setFormState((p) => ({
-                          ...p,
-                          password: e.target.value,
-                        }))
-                      }
-                      placeholder="Ingresa una contraseña segura"
-                    />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label>Confirmar contraseña</Label>
-                    <Input
-                      type="password"
-                      autoComplete="new-password"
-                      value={formState.passwordConfirm}
-                      onChange={(e) =>
-                        setFormState((p) => ({
-                          ...p,
-                          passwordConfirm: e.target.value,
-                        }))
-                      }
-                      placeholder="Repite la contraseña"
-                    />
-                  </div>
-                </div>
-              )}
-
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border px-4 py-3">
-                <div>
-                  <p className="text-sm font-medium">Usuario activo</p>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border px-4 py-3">
+              <div>
+                <p className="text-sm font-medium">Usuario activo</p>
+                <p className="text-xs text-muted-foreground">
+                  Habilita o deshabilita el acceso.
+                </p>
+              </div>
+              <Switch
+                checked={formState.activo}
+                onCheckedChange={(checked) =>
+                  setFormState((p) => ({ ...p, activo: checked }))
+                }
+              />
+            </div>
+            {isEditing && (
+              <div className="space-y-4 rounded-lg border px-4 py-3">
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">Cambiar contraseña</p>
                   <p className="text-xs text-muted-foreground">
-                    Habilita o deshabilita el acceso.
+                    Ingresa la contraseña actual y define una nueva. Si no la
+                    recuerdas, puedes usar la opción
+                    <Link
+                      to="/recuperar"
+                      className="ml-1 font-semibold text-primary underline-offset-2 hover:underline"
+                    >
+                      Olvidé mi contraseña
+                    </Link>
+                    .
                   </p>
                 </div>
-                <Switch
-                  checked={formState.activo}
-                  onCheckedChange={(checked) =>
-                    setFormState((p) => ({ ...p, activo: checked }))
-                  }
-                />
-              </div>
-              {isEditing && (
-                <div className="space-y-4 rounded-lg border px-4 py-3">
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium">Cambiar contraseña</p>
-                    <p className="text-xs text-muted-foreground">
-                      Ingresa la contraseña actual y define una nueva. Si no la
-                      recuerdas, puedes usar la opción
-                      <Link
-                        to="/recuperar"
-                        className="ml-1 font-semibold text-primary underline-offset-2 hover:underline"
-                      >
-                        Olvidé mi contraseña
-                      </Link>
-                      .
-                    </p>
+                <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
+                  <div className="grid gap-2">
+                    <Label>Contraseña actual</Label>
+                    <Input
+                      type="password"
+                      autoComplete="current-password"
+                      value={formState.currentPassword}
+                      onChange={(e) =>
+                        setFormState((p) => ({
+                          ...p,
+                          currentPassword: e.target.value,
+                        }))
+                      }
+                    />
                   </div>
-                  <div className="grid gap-4 grid-cols-1 sm:grid-cols-3">
-                    <div className="grid gap-2">
-                      <Label>Contraseña actual</Label>
-                      <Input
-                        type="password"
-                        autoComplete="current-password"
-                        value={formState.currentPassword}
-                        onChange={(e) =>
-                          setFormState((p) => ({
-                            ...p,
-                            currentPassword: e.target.value,
-                          }))
-                        }
-                        placeholder="Ingresa tu contraseña actual"
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label>Nueva contraseña</Label>
-                      <Input
-                        type="password"
-                        autoComplete="new-password"
-                        value={formState.newPassword}
-                        onChange={(e) =>
-                          setFormState((p) => ({
-                            ...p,
-                            newPassword: e.target.value,
-                          }))
-                        }
-                        placeholder="Contraseña diferente a la actual"
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label>Confirmar nueva contraseña</Label>
-                      <Input
-                        type="password"
-                        autoComplete="new-password"
-                        value={formState.confirmNewPassword}
-                        onChange={(e) =>
-                          setFormState((p) => ({
-                            ...p,
-                            confirmNewPassword: e.target.value,
-                          }))
-                        }
-                        placeholder="Repite la nueva contraseña"
-                      />
-                    </div>
+                  <div className="grid gap-2">
+                    <Label>Nueva contraseña</Label>
+                    <Input
+                      type="password"
+                      autoComplete="new-password"
+                      value={formState.newPassword}
+                      onChange={(e) =>
+                        setFormState((p) => ({
+                          ...p,
+                          newPassword: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label>Confirmar nueva contraseña</Label>
+                    <Input
+                      type="password"
+                      autoComplete="new-password"
+                      value={formState.confirmNewPassword}
+                      onChange={(e) =>
+                        setFormState((p) => ({
+                          ...p,
+                          confirmNewPassword: e.target.value,
+                        }))
+                      }
+                    />
                   </div>
                 </div>
-              )}
+              </div>
+            )}
 
-              <div className="flex flex-col sm:flex-row gap-3 sm:justify-end">
+            <div className="flex flex-col sm:flex-row gap-3 sm:justify-end">
+              {isEditing && (
                 <Button
                   type="button"
                   variant="outline"
                   onClick={resetForm}
-                  disabled={submitting}
+                  className="w-full sm:w-auto"
                 >
-                  {isEditing ? "Cancelar" : "Limpiar"}
+                  Cancelar edición
                 </Button>
-                <Button
-                  type="submit"
-                  className="bg-gradient-primary gap-2"
-                  disabled={submitting}
-                >
-                  {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {isEditing ? "Guardar cambios" : "Guardar usuario"}
-                </Button>
-              </div>
-            </form>
-          </CardContent>
-        </Card>
-      </div>
+              )}
+              <Button
+                type="submit"
+                className="w-full sm:w-auto"
+                disabled={submitting}
+              >
+                {submitting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : isEditing ? (
+                  "Guardar cambios"
+                ) : (
+                  "Crear usuario"
+                )}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* === TABLA RESPONSIVE === */}
       <Card className="border-border">
