@@ -1,12 +1,20 @@
 export type RoleSlug = "admin" | "vendedor" | "promotor" | "unknown";
 
-const APP_ROUTES = ["/", "/entradas", "/eventos", "/listas", "/usuarios", "/configuracion"] as const;
+const APP_ROUTES = [
+  "/",
+  "/entradas",
+  "/anticipadas",
+  "/eventos",
+  "/listas",
+  "/usuarios",
+  "/configuracion",
+] as const;
 
 type AppRoute = (typeof APP_ROUTES)[number];
 
 const ROUTES_BY_ROLE: Record<RoleSlug, AppRoute[]> = {
   admin: [...APP_ROUTES],
-  vendedor: ["/entradas", "/listas"],
+  vendedor: ["/entradas", "/anticipadas", "/listas"],
   promotor: [],
   unknown: ["/entradas"],
 };

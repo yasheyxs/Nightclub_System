@@ -1,6 +1,7 @@
 import {
   LayoutDashboard,
   Ticket,
+  TicketCheck,
   Calendar,
   Users,
   Settings,
@@ -33,6 +34,12 @@ const navigation: NavigationItem[] = [
     name: "Entradas",
     href: "/entradas",
     icon: Ticket,
+    allowedRoles: ["admin", "vendedor"],
+  },
+  {
+    name: "Anticipadas",
+    href: "/anticipadas",
+    icon: TicketCheck,
     allowedRoles: ["admin", "vendedor"],
   },
   {
