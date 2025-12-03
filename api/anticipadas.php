@@ -150,6 +150,7 @@ try {
             $dni = trim($input['dni'] ?? '');
             $cantidad = isset($input['cantidad']) ? max(1, (int)$input['cantidad']) : 1;
             $incluyeTrago = filter_var($input['incluye_trago'] ?? false, FILTER_VALIDATE_BOOLEAN);
+            $incluyeTragoValor = $incluyeTrago ? 'true' : 'false';
 
             if ($nombre === '') {
                 http_response_code(400);
@@ -181,7 +182,7 @@ try {
             try {
                 $stmt = $pdo->prepare(<<<SQL
                     INSERT INTO anticipadas (nombre, dni, entrada_id, evento_id, cantidad, incluye_trago)
-                    VALUES (:nombre, :dni, :entrada_id, :evento_id, :cantidad, :incluye_trago)
+                    VALUES (:nombre, :dni, :entrada_id, :evento_id, :cantidad, CAST(:incluye_trago AS boolean))
                     RETURNING id;
                 SQL);
 
@@ -191,14 +192,14 @@ try {
                     ':entrada_id' => $entradaId,
                     ':evento_id' => $eventoId ?: null,
                     ':cantidad' => $cantidad,
-                    ':incluye_trago' => $incluyeTrago,
+                    ':incluye_trago' => $incluyeTragoValor,
                 ]);
 
                 $nuevoId = (int)$stmt->fetchColumn();
 
                 $ventaStmt = $pdo->prepare('
                     INSERT INTO ventas_entradas (entrada_id, evento_id, cantidad, precio_unitario, incluye_trago)
-                    VALUES (:entrada_id, :evento_id, :cantidad, :precio_unitario, :incluye_trago)
+                    VALUES (:entrada_id, :evento_id, :cantidad, :precio_unitario, CAST(:incluye_trago AS boolean))
                 ');
                 $ventaStmt->bindValue(':entrada_id', $entradaId, PDO::PARAM_INT);
                 if ($eventoId === null) {
@@ -208,7 +209,7 @@ try {
                 }
                 $ventaStmt->bindValue(':cantidad', $cantidad, PDO::PARAM_INT);
                 $ventaStmt->bindValue(':precio_unitario', $precioUnitario);
-                $ventaStmt->bindValue(':incluye_trago', $incluyeTrago, PDO::PARAM_BOOL);
+                $ventaStmt->bindValue(':incluye_trago', $incluyeTragoValor, PDO::PARAM_STR);
                 $ventaStmt->execute();
 
                 $detalleStmt = $pdo->prepare(<<<SQL
