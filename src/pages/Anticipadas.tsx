@@ -14,14 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "@/hooks/use-toast";
 import { api } from "@/services/api";
-import {
-  Loader2,
-  Printer,
-  Search,
-  Ticket,
-  UserRoundPlus,
-  CalendarDays,
-} from "lucide-react";
+import { Loader2, Printer, Search, UserRoundPlus } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -31,6 +24,13 @@ import {
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 
 interface AnticipadaResponse {
   id: number;
@@ -91,6 +91,7 @@ export default function Anticipadas() {
   const [eventos, setEventos] = useState<EventoOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [optionsLoading, setOptionsLoading] = useState(true);
+  const [formOpen, setFormOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [printingId, setPrintingId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
@@ -102,6 +103,16 @@ export default function Anticipadas() {
     cantidad: 1,
     incluyeTrago: false,
   });
+
+  const resetForm = () => {
+    setFormData((prev) => ({
+      ...prev,
+      nombre: "",
+      dni: "",
+      cantidad: 1,
+      incluyeTrago: false,
+    }));
+  };
 
   const fetchAnticipadas = async () => {
     setLoading(true);
@@ -146,6 +157,19 @@ export default function Anticipadas() {
         fecha: evento.fecha,
       }));
       setEventos(mappedEventos);
+      if (mappedEventos.length > 0) {
+        const proximoEvento = mappedEventos[0]; // el primero siempre es el próximo upcoming
+        setFormData((prev) => ({
+          ...prev,
+          eventoId: String(proximoEvento.id),
+        }));
+      } else {
+        // si NO hay eventos, dejamos none
+        setFormData((prev) => ({
+          ...prev,
+          eventoId: "",
+        }));
+      }
     } catch (error) {
       console.error("Error cargando opciones de anticipadas:", error);
       toast({
@@ -173,11 +197,6 @@ export default function Anticipadas() {
         .includes(query)
     );
   }, [anticipadas, search]);
-
-  const totalPorImprimir = anticipadas.reduce(
-    (acc, item) => acc + item.cantidad,
-    0
-  );
 
   const handlePrint = async (itemId: number) => {
     setPrintingId(itemId);
@@ -239,13 +258,8 @@ export default function Anticipadas() {
           title: "Anticipada registrada",
           description: data?.mensaje ?? "Se agregó al listado.",
         });
-        setFormData((prev) => ({
-          ...prev,
-          nombre: "",
-          dni: "",
-          cantidad: 1,
-          incluyeTrago: false,
-        }));
+        resetForm();
+        setFormOpen(false);
       }
     } catch (error) {
       console.error("Error al registrar anticipada:", error);
@@ -274,269 +288,261 @@ export default function Anticipadas() {
             Gestioná las compras anticipadas y enviá los tickets a impresión.
           </p>
         </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_1fr] gap-4">
-        <Card className="border-border">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-xl">
-              <UserRoundPlus className="h-5 w-5 text-primary" />
-              Registrar nueva anticipada
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="nombre">Nombre y apellido</Label>
-                <Input
-                  id="nombre"
-                  value={formData.nombre}
-                  onChange={(e) =>
-                    setFormData({ ...formData, nombre: e.target.value })
-                  }
-                  placeholder="Ej: María Pérez"
-                  className="h-11"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="dni">DNI</Label>
-                <Input
-                  id="dni"
-                  value={formData.dni}
-                  onChange={(e) =>
-                    setFormData({ ...formData, dni: e.target.value })
-                  }
-                  placeholder="Opcional"
-                  className="h-11"
-                />
-              </div>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-3">
-              <div className="space-y-2 md:col-span-2">
-                <Label>Entrada anticipada</Label>
-                <Select
-                  value={formData.entradaId}
-                  onValueChange={(value) =>
-                    setFormData({ ...formData, entradaId: value })
-                  }
-                  disabled={optionsLoading || entradasAnticipadas.length === 0}
-                >
-                  <SelectTrigger className="h-11">
-                    <SelectValue placeholder="No hay entradas anticipadas" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {entradasAnticipadas.map((entrada) => (
-                      <SelectItem key={entrada.id} value={String(entrada.id)}>
-                        {entrada.nombre}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {selectedEntrada?.precio_base !== undefined && (
-                  <p className="text-xs text-muted-foreground">
-                    Precio actual: ${selectedEntrada.precio_base}
-                  </p>
-                )}
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="cantidad">Cantidad</Label>
-                <Input
-                  id="cantidad"
-                  type="number"
-                  min={1}
-                  value={formData.cantidad}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      cantidad: Math.max(1, Number(e.target.value)),
-                    })
-                  }
-                  className="h-11"
-                />
-              </div>
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>Evento</Label>
-                <Select
-                  value={formData.eventoId}
-                  onValueChange={(value) =>
-                    setFormData({
-                      ...formData,
-                      eventoId: value === "none" ? "" : value,
-                    })
-                  }
-                  disabled={optionsLoading}
-                >
-                  <SelectTrigger className="h-11">
-                    <SelectValue placeholder="Sin evento asignado" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Sin evento asignado</SelectItem>
-                    {eventos.map((evento) => (
-                      <SelectItem key={evento.id} value={String(evento.id)}>
-                        {evento.nombre}
-                        {evento.fecha
-                          ? ` — ${new Date(evento.fecha).toLocaleDateString(
-                              "es-AR"
-                            )}`
-                          : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex items-center justify-between gap-3 border border-border rounded-lg px-4 py-3">
-                <div>
-                  <p className="font-medium">Incluye trago</p>
-                  <p className="text-sm text-muted-foreground">
-                    Agregá el beneficio al ticket impreso.
-                  </p>
+        <Dialog
+          open={formOpen}
+          onOpenChange={(isOpen) => {
+            setFormOpen(isOpen);
+            if (!isOpen) {
+              resetForm();
+            }
+          }}
+        >
+          <DialogTrigger asChild>
+            <Button size="lg" className="gap-2">
+              <UserRoundPlus className="h-5 w-5" />
+              Registrar
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="text-2xl">
+                Registrar anticipada
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="nombre">Nombre y apellido</Label>
+                  <Input
+                    id="nombre"
+                    value={formData.nombre}
+                    onChange={(e) =>
+                      setFormData({ ...formData, nombre: e.target.value })
+                    }
+                    placeholder="Ej: María Pérez"
+                    className="h-11"
+                  />
                 </div>
-                <Switch
-                  checked={formData.incluyeTrago}
-                  onCheckedChange={(checked) =>
-                    setFormData({ ...formData, incluyeTrago: checked })
-                  }
-                />
+                <div className="space-y-2">
+                  <Label htmlFor="dni">DNI</Label>
+                  <Input
+                    id="dni"
+                    value={formData.dni}
+                    onChange={(e) =>
+                      setFormData({ ...formData, dni: e.target.value })
+                    }
+                    placeholder="Opcional"
+                    className="h-11"
+                  />
+                </div>
               </div>
-            </div>
 
-            <div className="flex justify-end">
-              <Button
-                onClick={handleCreate}
-                disabled={creating || optionsLoading || !formData.entradaId}
-                className="min-w-[200px]"
-              >
-                {creating ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  "Registrar anticipada"
-                )}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-border">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-xl">
-              <CalendarDays className="h-5 w-5 text-primary" />
-              Resumen rápido
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="border border-border rounded-lg p-4">
-              <p className="text-sm text-muted-foreground">
-                Anticipadas cargadas
-              </p>
-              <div className="flex items-center gap-2">
-                <Ticket className="h-4 w-4 text-primary" />
-                <p className="text-2xl font-bold">{anticipadas.length}</p>
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="space-y-2 md:col-span-2">
+                  <Label>Entrada anticipada</Label>
+                  <Select
+                    value={formData.entradaId}
+                    onValueChange={(value) =>
+                      setFormData({ ...formData, entradaId: value })
+                    }
+                    disabled={
+                      optionsLoading || entradasAnticipadas.length === 0
+                    }
+                  >
+                    <SelectTrigger className="h-11">
+                      <SelectValue placeholder="No hay entradas anticipadas" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {entradasAnticipadas.map((entrada) => (
+                        <SelectItem key={entrada.id} value={String(entrada.id)}>
+                          {entrada.nombre}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {selectedEntrada?.precio_base !== undefined && (
+                    <p className="text-xs text-muted-foreground">
+                      Precio actual: ${selectedEntrada.precio_base}
+                    </p>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="cantidad">Cantidad</Label>
+                  <Input
+                    id="cantidad"
+                    type="number"
+                    min={1}
+                    value={formData.cantidad}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        cantidad: Math.max(1, Number(e.target.value)),
+                      })
+                    }
+                    className="h-11"
+                  />
+                </div>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Evento</Label>
+                  <Select
+                    value={formData.eventoId}
+                    onValueChange={(value) =>
+                      setFormData({
+                        ...formData,
+                        eventoId: value === "none" ? "" : value,
+                      })
+                    }
+                    disabled={optionsLoading}
+                  >
+                    <SelectTrigger className="h-11">
+                      <SelectValue placeholder="Sin evento asignado" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Sin evento asignado</SelectItem>
+                      {eventos.map((evento) => (
+                        <SelectItem key={evento.id} value={String(evento.id)}>
+                          {evento.nombre}
+                          {evento.fecha
+                            ? ` — ${new Date(evento.fecha).toLocaleDateString(
+                                "es-AR",
+                                {
+                                  month: "short",
+                                  day: "numeric",
+                                }
+                              )}`
+                            : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center justify-between gap-3 border border-border rounded-lg px-4 py-3">
+                  <div>
+                    <p className="font-medium">Incluye trago</p>
+                    <p className="text-sm text-muted-foreground">
+                      Agregá el beneficio al ticket impreso.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={formData.incluyeTrago}
+                    onCheckedChange={(checked) =>
+                      setFormData({ ...formData, incluyeTrago: checked })
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-3 flex-col md:flex-row md:justify-end">
+                <Button
+                  className="w-full md:w-auto"
+                  onClick={handleCreate}
+                  disabled={creating || optionsLoading || !formData.entradaId}
+                >
+                  {creating ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    "Registrar anticipada"
+                  )}
+                </Button>
               </div>
             </div>
-            <div className="border border-border rounded-lg p-4">
-              <p className="text-sm text-muted-foreground">
-                Tickets a imprimir
-              </p>
-              <p className="text-2xl font-bold">{totalPorImprimir}</p>
-            </div>
-            <div className="sm:col-span-2">
-              <p className="text-sm text-muted-foreground mb-2">
-                Filtrar listado
-              </p>
-              <div className="relative">
-                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Buscar por nombre, DNI o evento"
-                  className="pl-8"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+          </DialogContent>
+        </Dialog>
       </div>
 
-      <div className="bg-card border border-border rounded-lg p-4">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <p className="text-lg font-semibold">Pendientes de impresión</p>
-            <p className="text-sm text-muted-foreground">
-              Lista de personas con compras anticipadas listas para entregar.
+      <Card className="border-border">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-lg font-semibold">Pendientes de impresión</p>
+              <p className="text-sm text-muted-foreground">
+                Lista de personas con compras anticipadas listas para entregar.
+              </p>
+            </div>
+            <div className="relative w-full md:w-72">
+              <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Buscar por nombre, DNI o evento"
+                className="pl-8"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="flex items-center text-muted-foreground text-sm py-10">
+              <Loader2 className="h-4 w-4 animate-spin mr-2" /> Cargando
+              anticipadas...
+            </div>
+          ) : filteredAnticipadas.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-6">
+              No hay anticipadas para mostrar.
             </p>
-          </div>
-        </div>
-
-        {loading ? (
-          <div className="flex items-center text-muted-foreground text-sm py-10">
-            <Loader2 className="h-4 w-4 animate-spin mr-2" /> Cargando
-            anticipadas...
-          </div>
-        ) : filteredAnticipadas.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-6">
-            No hay anticipadas para mostrar.
-          </p>
-        ) : (
-          <ScrollArea className="h-[480px]">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Nombre</TableHead>
-                  <TableHead>DNI</TableHead>
-                  <TableHead>Entrada</TableHead>
-                  <TableHead className="text-center">Cantidad</TableHead>
-                  <TableHead>Evento</TableHead>
-                  <TableHead className="text-right">Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredAnticipadas.map((item) => (
-                  <TableRow key={item.id}>
-                    <TableCell>
-                      <div className="font-semibold text-foreground">
-                        {item.nombre}
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        Anticipada registrada
-                      </p>
-                    </TableCell>
-                    <TableCell>{item.dni}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="secondary">{item.entradaNombre}</Badge>
-                        {item.incluyeTrago && (
-                          <Badge variant="outline">+ Trago</Badge>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-center font-semibold">
-                      {item.cantidad}
-                    </TableCell>
-                    <TableCell>{item.eventoNombre}</TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        disabled={printingId === item.id}
-                        onClick={() => handlePrint(item.id)}
-                      >
-                        {printingId === item.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Printer className="h-4 w-4" />
-                        )}
-                      </Button>
-                    </TableCell>
+          ) : (
+            <ScrollArea className="h-[480px]">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Nombre</TableHead>
+                    <TableHead>DNI</TableHead>
+                    <TableHead>Entrada</TableHead>
+                    <TableHead className="text-center">Cantidad</TableHead>
+                    <TableHead>Evento</TableHead>
+                    <TableHead className="text-right">Acciones</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </ScrollArea>
-        )}
-      </div>
+                </TableHeader>
+                <TableBody>
+                  {filteredAnticipadas.map((item) => (
+                    <TableRow key={item.id}>
+                      <TableCell>
+                        <div className="font-semibold text-foreground">
+                          {item.nombre}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          Anticipada registrada
+                        </p>
+                      </TableCell>
+                      <TableCell>{item.dni}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="secondary">
+                            {item.entradaNombre}
+                          </Badge>
+                          {item.incluyeTrago && (
+                            <Badge variant="outline">+ Trago</Badge>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-center font-semibold">
+                        {item.cantidad}
+                      </TableCell>
+                      <TableCell>{item.eventoNombre}</TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={printingId === item.id}
+                          onClick={() => handlePrint(item.id)}
+                        >
+                          {printingId === item.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Printer className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </ScrollArea>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

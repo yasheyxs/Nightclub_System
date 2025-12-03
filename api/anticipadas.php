@@ -1,4 +1,10 @@
 <?php
+
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
+
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
@@ -151,60 +157,94 @@ try {
                 exit;
             }
 
-            $stmt = $pdo->prepare(<<<SQL
-                INSERT INTO anticipadas (nombre, dni, entrada_id, evento_id, cantidad, incluye_trago)
-                VALUES (:nombre, :dni, :entrada_id, :evento_id, :cantidad, :incluye_trago)
-                RETURNING id;
-            SQL);
+            // Recuperamos el precio base de la entrada para registrar la venta
+            $entradaStmt = $pdo->prepare('SELECT precio_base FROM entradas WHERE id = :id');
+            $entradaStmt->execute([':id' => $entradaId]);
+            $entradaData = $entradaStmt->fetch();
 
-            $stmt->execute([
-                ':nombre' => $nombre,
-                ':dni' => $dni ?: null,
-                ':entrada_id' => $entradaId,
-                ':evento_id' => $eventoId ?: null,
-                ':cantidad' => $cantidad,
-                ':incluye_trago' => $incluyeTrago,
-            ]);
-
-            $nuevoId = (int) $stmt->fetchColumn();
-
-            $detalleStmt = $pdo->prepare(<<<SQL
-                SELECT
-                    a.id,
-                    a.nombre,
-                    a.dni,
-                    a.entrada_id,
-                    a.evento_id,
-                    a.cantidad,
-                    a.incluye_trago,
-                    e.nombre AS entrada_nombre,
-                    e.precio_base AS entrada_precio,
-                    ev.nombre AS evento_nombre
-                FROM anticipadas a
-                LEFT JOIN entradas e ON e.id = a.entrada_id
-                LEFT JOIN eventos ev ON ev.id = a.evento_id
-                WHERE a.id = :id
-                LIMIT 1;
-            SQL);
-            $detalleStmt->execute([':id' => $nuevoId]);
-
-            $nuevaAnticipada = $detalleStmt->fetch();
-
-            if ($nuevaAnticipada) {
-                $nuevaAnticipada['id'] = (int)$nuevaAnticipada['id'];
-                $nuevaAnticipada['entrada_id'] = (int)$nuevaAnticipada['entrada_id'];
-                $nuevaAnticipada['cantidad'] = (int)($nuevaAnticipada['cantidad'] ?? 1);
-                $nuevaAnticipada['incluye_trago'] = filter_var($nuevaAnticipada['incluye_trago'], FILTER_VALIDATE_BOOLEAN);
-                $nuevaAnticipada['entrada_precio'] = isset($nuevaAnticipada['entrada_precio']) ? (float)$nuevaAnticipada['entrada_precio'] : 0.0;
-                $nuevaAnticipada['evento_id'] = isset($nuevaAnticipada['evento_id']) ? (int)$nuevaAnticipada['evento_id'] : null;
+            if (!$entradaData) {
+                http_response_code(404);
+                echo json_encode(['error' => 'La entrada seleccionada no existe.']);
+                exit;
             }
 
-            echo json_encode([
-                'success' => true,
-                'mensaje' => 'Anticipada registrada correctamente.',
-                'anticipada' => $nuevaAnticipada,
-            ], JSON_UNESCAPED_UNICODE);
-            exit;
+            $precioUnitario = isset($entradaData['precio_base']) ? (float)$entradaData['precio_base'] : 0.0;
+
+            $pdo->beginTransaction();
+
+            try {
+                $stmt = $pdo->prepare(<<<SQL
+                    INSERT INTO anticipadas (nombre, dni, entrada_id, evento_id, cantidad, incluye_trago)
+                    VALUES (:nombre, :dni, :entrada_id, :evento_id, :cantidad, :incluye_trago)
+                    RETURNING id;
+                SQL);
+
+                $stmt->execute([
+                    ':nombre' => $nombre,
+                    ':dni' => $dni ?: null,
+                    ':entrada_id' => $entradaId,
+                    ':evento_id' => $eventoId ?: null,
+                    ':cantidad' => $cantidad,
+                    ':incluye_trago' => $incluyeTrago,
+                ]);
+
+                $nuevoId = (int) $stmt->fetchColumn();
+
+                $ventaStmt = $pdo->prepare('INSERT INTO ventas_entradas (entrada_id, evento_id, cantidad, precio_unitario, incluye_trago) VALUES (:entrada_id, :evento_id, :cantidad, :precio_unitario, :incluye_trago)');
+                $ventaStmt->bindValue(':entrada_id', $entradaId, PDO::PARAM_INT);
+                if ($eventoId === null) {
+                    $ventaStmt->bindValue(':evento_id', null, PDO::PARAM_NULL);
+                } else {
+                    $ventaStmt->bindValue(':evento_id', $eventoId, PDO::PARAM_INT);
+                }
+                $ventaStmt->bindValue(':cantidad', $cantidad, PDO::PARAM_INT);
+                $ventaStmt->bindValue(':precio_unitario', $precioUnitario);
+                $ventaStmt->bindValue(':incluye_trago', $incluyeTrago, PDO::PARAM_BOOL);
+                $ventaStmt->execute();
+
+                $detalleStmt = $pdo->prepare(<<<SQL
+                    SELECT
+                        a.id,
+                        a.nombre,
+                        a.dni,
+                        a.entrada_id,
+                        a.evento_id,
+                        a.cantidad,
+                        a.incluye_trago,
+                        e.nombre AS entrada_nombre,
+                        e.precio_base AS entrada_precio,
+                        ev.nombre AS evento_nombre
+                    FROM anticipadas a
+                    LEFT JOIN entradas e ON e.id = a.entrada_id
+                    LEFT JOIN eventos ev ON ev.id = a.evento_id
+                    WHERE a.id = :id
+                    LIMIT 1;
+                SQL);
+                $detalleStmt->execute([':id' => $nuevoId]);
+
+                $nuevaAnticipada = $detalleStmt->fetch();
+
+                if ($nuevaAnticipada) {
+                    $nuevaAnticipada['id'] = (int)$nuevaAnticipada['id'];
+                    $nuevaAnticipada['entrada_id'] = (int)$nuevaAnticipada['entrada_id'];
+                    $nuevaAnticipada['cantidad'] = (int)($nuevaAnticipada['cantidad'] ?? 1);
+                    $nuevaAnticipada['incluye_trago'] = filter_var($nuevaAnticipada['incluye_trago'], FILTER_VALIDATE_BOOLEAN);
+                    $nuevaAnticipada['entrada_precio'] = isset($nuevaAnticipada['entrada_precio']) ? (float)$nuevaAnticipada['entrada_precio'] : 0.0;
+                    $nuevaAnticipada['evento_id'] = isset($nuevaAnticipada['evento_id']) ? (int)$nuevaAnticipada['evento_id'] : null;
+                }
+
+                $pdo->commit();
+
+                echo json_encode([
+                    'success' => true,
+                    'mensaje' => 'Anticipada registrada correctamente.',
+                    'anticipada' => $nuevaAnticipada,
+                ], JSON_UNESCAPED_UNICODE);
+                exit;
+            } catch (Throwable $e) {
+                $pdo->rollBack();
+                throw $e;
+            }
         }
 
         if ($accion === 'imprimir') {
