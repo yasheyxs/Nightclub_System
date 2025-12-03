@@ -76,7 +76,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   });
 
   const login = useCallback(async (telefono: string, password: string) => {
-    const response = await fetch(`${API_BASE_URL}/login.php`, {
+    const response = await fetch(`${API_BASE_URL}/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ telefono, password }),

@@ -83,7 +83,7 @@ export default function Eventos() {
     const fetchEvents = async () => {
       setLoading(true);
       try {
-        const { data } = await api.get<Event[]>("/eventos.php?calendar=1");
+        const { data } = await api.get<Event[]>("/eventos?calendar=1");
         setEvents(onlyFutureSorted(data));
       } catch (error) {
         console.error(error);
@@ -131,7 +131,7 @@ export default function Eventos() {
 
     try {
       if (editing) {
-        const { data } = await api.put<Event>(`/eventos.php?id=${editing.id}`, {
+        const { data } = await api.put<Event>(`/eventos?id=${editing.id}`, {
           nombre: form.nombre,
           detalle: form.detalle,
           capacidad: parseInt(form.capacidad, 10),
@@ -144,7 +144,7 @@ export default function Eventos() {
           description: "Cambios guardados.",
         });
       } else {
-        const { data } = await api.post<Event>("/eventos.php", {
+        const { data } = await api.post<Event>("/eventos", {
           nombre: form.nombre,
           detalle: form.detalle,
           fecha: form.fecha,
@@ -180,7 +180,7 @@ export default function Eventos() {
     if (!deleteTarget) return;
     setDeleteLoading(true);
     try {
-      await api.delete(`/eventos.php?id=${deleteTarget.id}`);
+      await api.delete(`/eventos?id=${deleteTarget.id}`);
       setEvents((prev) =>
         onlyFutureSorted(prev.filter((e) => e.id !== deleteTarget.id))
       );

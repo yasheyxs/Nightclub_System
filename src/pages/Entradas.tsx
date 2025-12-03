@@ -106,7 +106,7 @@ export default function Entradas() {
       setLoading(true);
       try {
         const { data } = await api.get<VentaEntradasResponse>(
-          "/venta_entradas.php"
+          "/venta_entradas"
         );
 
         const mappedEvents = data.eventos.map((evento) => ({
@@ -235,7 +235,7 @@ export default function Entradas() {
     setClosingEvent(true);
 
     api
-      .post("/venta_entradas.php", {
+      .post("/venta_entradas", {
         accion: "cerrar_evento",
         evento_id: Number(selectedEvent),
       })
@@ -372,7 +372,7 @@ export default function Entradas() {
         incluye_trago: tipoOperacion === "venta" ? incluyeTrago : false,
       };
 
-      const { data } = await api.post("/venta_entradas.php", payload);
+      const { data } = await api.post("/venta_entradas", payload);
       const eventKey =
         data?.evento_id !== undefined && data?.evento_id !== null
           ? String(data.evento_id)

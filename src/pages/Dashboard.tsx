@@ -81,7 +81,7 @@ export default function Dashboard(): JSX.Element {
   );
 
   useEffect(() => {
-    fetch("http://localhost:8000/api/dashboard.php")
+    fetch("https://santas-phpback.4jkbnu.easypanel.host/dashboard")
       .then((res) => res.json() as Promise<DashboardResponse>)
       .then((data) => {
         setMetrics(data.metrics);
@@ -114,7 +114,7 @@ export default function Dashboard(): JSX.Element {
             variant="outline"
             onClick={() =>
               window.open(
-                "http://localhost:8000/api/dashboard.php?export=excel"
+                "https://santas-phpback.4jkbnu.easypanel.host/dashboard?export=excel"
               )
             }
           >
@@ -123,7 +123,9 @@ export default function Dashboard(): JSX.Element {
           </Button>
           <Button
             onClick={() =>
-              window.open("http://localhost:8000/api/dashboard.php?export=pdf")
+              window.open(
+                "https://santas-phpback.4jkbnu.easypanel.host/dashboard?export=pdf"
+              )
             }
           >
             <FileText className="w-4 h-4 mr-2" />

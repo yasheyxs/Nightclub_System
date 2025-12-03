@@ -108,20 +108,20 @@ const serializePayload = (payload: SaveUserPayload) => {
 };
 
 export const listRoles = async (): Promise<Role[]> => {
-  const { data } = await api.get("/roles.php");
+  const { data } = await api.get("/roles");
   if (!Array.isArray(data)) return [];
   return data.map(normalizeRole).filter((role) => role.id !== 0 && role.nombre);
 };
 
 export const listUsers = async (): Promise<User[]> => {
-  const { data } = await api.get("/usuarios.php");
+  const { data } = await api.get("/usuarios");
   if (!Array.isArray(data)) return [];
   return data.map(normalizeUser).filter((user) => user.id !== 0);
 };
 
 export const createUser = async (payload: SaveUserPayload): Promise<User> => {
   const body = serializePayload(payload);
-  const { data } = await api.post("/usuarios.php", body); //  POST para crear
+  const { data } = await api.post("/usuarios", body); //  POST para crear
   return normalizeUser(data);
 };
 
@@ -130,7 +130,7 @@ export const updateUser = async (
   payload: SaveUserPayload
 ): Promise<User> => {
   const body = serializePayload(payload);
-  const { data } = await api.put(`/usuarios.php?id=${id}`, body); // pasa id como query
+  const { data } = await api.put(`/usuarios?id=${id}`, body); // pasa id como query
   return normalizeUser(data);
 };
 
@@ -139,5 +139,5 @@ export const deleteUser = async (
   options?: { password?: string }
 ): Promise<void> => {
   const data = options?.password ? { password: options.password } : undefined;
-  await api.delete(`/usuarios.php?id=${id}`, { data });
+  await api.delete(`/usuarios?id=${id}`, { data });
 };

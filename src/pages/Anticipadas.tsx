@@ -131,7 +131,7 @@ export default function Anticipadas() {
   const fetchAnticipadas = async () => {
     setLoading(true);
     try {
-      const { data } = await api.get<AnticipadaResponse[]>("/anticipadas.php");
+      const { data } = await api.get<AnticipadaResponse[]>("/anticipadas");
       const mapped: AnticipadaItem[] = (data ?? []).map(mapAnticipada);
       setAnticipadas(mapped);
     } catch (error) {
@@ -150,8 +150,8 @@ export default function Anticipadas() {
     setOptionsLoading(true);
     try {
       const [entradasRes, eventosRes] = await Promise.all([
-        api.get<EntradaOption[]>("/entradas.php"),
-        api.get<EventoOption[]>("/eventos.php?upcoming=1"),
+        api.get<EntradaOption[]>("/entradas"),
+        api.get<EventoOption[]>("/eventos?upcoming=1"),
       ]);
 
       const anticipadasOptions = (entradasRes.data ?? []).filter(
@@ -215,7 +215,7 @@ export default function Anticipadas() {
   const handlePrint = async (itemId: number) => {
     setPrintingId(itemId);
     try {
-      const { data } = await api.post("/anticipadas.php", {
+      const { data } = await api.post("/anticipadas", {
         accion: "imprimir",
         id: itemId,
       });
@@ -254,7 +254,7 @@ export default function Anticipadas() {
 
     setCreating(true);
     try {
-      const { data } = await api.post("/anticipadas.php", {
+      const { data } = await api.post("/anticipadas", {
         accion: "crear",
         nombre: formData.nombre.trim(),
         dni: formData.dni.trim(),
@@ -290,7 +290,7 @@ export default function Anticipadas() {
     if (!deleteTarget) return;
     setDeletingId(deleteTarget.id);
     try {
-      await api.post("/anticipadas.php", {
+      await api.post("/anticipadas", {
         accion: "eliminar",
         id: deleteTarget.id,
       });

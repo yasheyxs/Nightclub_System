@@ -82,7 +82,7 @@ export default function Listas() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const { data } = await api.get<UserResponse[]>("/listas.php");
+        const { data } = await api.get<UserResponse[]>("/listas");
         if (Array.isArray(data)) {
           const formatted: ListUser[] = data.map((u) => ({
             id: String(u.usuario_id),
@@ -157,7 +157,7 @@ export default function Listas() {
 
     try {
       if (editingGuestId) {
-        const { data } = await api.put(`/listas.php?id=${editingGuestId}`, {
+        const { data } = await api.put(`/listas?id=${editingGuestId}`, {
           nombre_persona: guestForm.fullName,
           telefono: guestForm.document,
         });
@@ -181,7 +181,7 @@ export default function Listas() {
         );
         toast({ title: "Actualizado", description: "Invitado editado." });
       } else {
-        const { data } = await api.post("/listas.php", {
+        const { data } = await api.post("/listas", {
           usuario_id: selectedUser.id,
           nombre_persona: guestForm.fullName,
           telefono: guestForm.document,
@@ -215,7 +215,7 @@ export default function Listas() {
   const handleDeleteGuest = async (guestId: string) => {
     if (!window.confirm("¿Eliminar invitado?")) return;
     try {
-      await api.delete(`/listas.php?id=${guestId}`);
+      await api.delete(`/listas?id=${guestId}`);
       setUsers((prev) =>
         prev.map((u) =>
           u.id === selectedUserId
@@ -256,7 +256,7 @@ export default function Listas() {
         documento: guest.document ?? "",
       };
 
-      const { data } = await api.post("/imprimir_ticket_gratis.php", payload);
+      const { data } = await api.post("/imprimir_ticket_gratis", payload);
 
       const mensaje =
         typeof data?.mensaje === "string"

@@ -22,7 +22,7 @@ const ForgotPassword = () => {
 
     setLoading(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/password_reset.php`, {
+      const response = await fetch(`${API_BASE_URL}/password_reset`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email }),

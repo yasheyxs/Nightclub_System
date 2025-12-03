@@ -62,7 +62,7 @@ export default function Configuracion() {
   const fetchEntradas = async () => {
     setLoading(true);
     try {
-      const { data } = await api.get("/entradas.php");
+      const { data } = await api.get("/entradas");
       if (Array.isArray(data)) setEntradas(data);
       else throw new Error("Respuesta inválida del servidor");
     } catch (error) {
@@ -168,13 +168,13 @@ export default function Configuracion() {
             };
 
       if (editingId) {
-        await api.put(`/entradas.php?id=${editingId}`, payload);
+        await api.put(`/entradas?id=${editingId}`, payload);
         toast({
           title: "Actualizado",
           description: "Entrada modificada correctamente.",
         });
       } else {
-        await api.post("/entradas.php", payload);
+        await api.post("/entradas", payload);
         toast({ title: "Creado", description: "Nueva entrada agregada." });
       }
 
@@ -225,7 +225,7 @@ export default function Configuracion() {
     }
     if (!window.confirm("¿Seguro que deseas eliminar esta entrada?")) return;
     try {
-      await api.delete(`/entradas.php?id=${id}`);
+      await api.delete(`/entradas?id=${id}`);
       toast({
         title: "Eliminado",
         description: "Tipo de entrada eliminado correctamente.",

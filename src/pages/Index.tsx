@@ -102,7 +102,7 @@ export default function Dashboard(): JSX.Element {
           });
         }
         const res = await fetch(
-          `http://localhost:8000/api/dashboard.php?${params.toString()}`
+          `https://santas-phpback.4jkbnu.easypanel.host/dashboard?${params.toString()}`
         );
         const json = (await res.json()) as DashboardResponse;
         setData(json);
@@ -224,7 +224,7 @@ export default function Dashboard(): JSX.Element {
             variant="outline"
             onClick={() =>
               window.open(
-                `http://localhost:8000/api/dashboard.php?month=${selectedMonth}&export=csv`
+                `https://santas-phpback.4jkbnu.easypanel.host/dashboard?month=${selectedMonth}&export=csv`
               )
             }
           >
@@ -233,7 +233,7 @@ export default function Dashboard(): JSX.Element {
           <Button
             onClick={() =>
               window.open(
-                `http://localhost:8000/api/dashboard.php?month=${selectedMonth}&export=pdf`
+                `https://santas-phpback.4jkbnu.easypanel.host/dashboard?month=${selectedMonth}&export=pdf`
               )
             }
           >
