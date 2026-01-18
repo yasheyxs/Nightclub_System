@@ -3,6 +3,10 @@
 .env.*
 !.env.example
 *.env
+.envrc
+.npmrc
+.yarnrc
+.yarnrc.yml
 
 # Credentials & keys
 *.pem
