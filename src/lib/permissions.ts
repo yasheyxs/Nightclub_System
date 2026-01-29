@@ -4,6 +4,7 @@ const APP_ROUTES = [
   "/",
   "/entradas",
   "/anticipadas",
+  "/promotores",
   "/eventos",
   "/listas",
   "/usuarios",

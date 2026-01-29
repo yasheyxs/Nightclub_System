@@ -115,8 +115,6 @@ export default function Anticipadas() {
   const [loading, setLoading] = useState(true);
   const [optionsLoading, setOptionsLoading] = useState(true);
   const [cuposLoading, setCuposLoading] = useState(false);
-  const [savingCupos, setSavingCupos] = useState<Record<number, boolean>>({});
-  const [cupoEdits, setCupoEdits] = useState<Record<number, string>>({});
   const [formOpen, setFormOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [printingId, setPrintingId] = useState<number | null>(null);
@@ -228,13 +226,6 @@ export default function Anticipadas() {
       });
       const cupos = data ?? [];
       setPromotorCupos(cupos);
-      setCupoEdits((prev) => {
-        const next = { ...prev };
-        cupos.forEach((cupo) => {
-          next[cupo.usuario_id] = String(cupo.cupo_total);
-        });
-        return next;
-      });
       setFormData((prev) => {
         if (cupos.length === 0) {
           return { ...prev, promotorId: "" };
@@ -423,184 +414,6 @@ export default function Anticipadas() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      <Card className="border-border">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg font-semibold">
-            Cupos de promotores
-          </CardTitle>
-          <p className="text-sm text-muted-foreground">
-            Editá el cupo total por promotor para las anticipadas del evento
-            seleccionado.
-          </p>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label>Evento</Label>
-              <Select
-                value={formData.eventoId}
-                onValueChange={(value) =>
-                  setFormData({
-                    ...formData,
-                    eventoId: value === "none" ? "" : value,
-                  })
-                }
-                disabled={optionsLoading}
-              >
-                <SelectTrigger className="h-11">
-                  <SelectValue placeholder="Seleccioná un evento" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Sin evento asignado</SelectItem>
-                  {eventos.map((evento) => (
-                    <SelectItem key={evento.id} value={String(evento.id)}>
-                      {evento.nombre}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Entrada anticipada</Label>
-              <div className="rounded-lg border border-border bg-muted/30 px-4 py-3">
-                {optionsLoading ? (
-                  <p className="text-sm text-muted-foreground">
-                    Cargando opciones...
-                  </p>
-                ) : selectedEntrada ? (
-                  <div>
-                    <p className="font-semibold text-foreground">
-                      {selectedEntrada.nombre}
-                    </p>
-                    {entradaPrice !== null && (
-                      <p className="text-xs text-muted-foreground">
-                        Precio actual: ${entradaPrice}
-                      </p>
-                    )}
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    No hay una entrada anticipada configurada.
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {cuposLoading ? (
-            <div className="flex items-center text-muted-foreground text-sm py-6">
-              <Loader2 className="h-4 w-4 animate-spin mr-2" /> Cargando cupos
-              de promotores...
-            </div>
-          ) : promotorCupos.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No hay promotores disponibles para este evento.
-            </p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Promotor</TableHead>
-                  <TableHead className="text-center">Cupo total</TableHead>
-                  <TableHead className="text-center">Vendido</TableHead>
-                  <TableHead className="text-center">Disponible</TableHead>
-                  <TableHead className="text-right">Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {promotorCupos.map((promotor) => (
-                  <TableRow key={promotor.usuario_id}>
-                    <TableCell className="font-semibold text-foreground">
-                      {promotor.usuario_nombre}
-                    </TableCell>
-                    <TableCell className="text-center">
-                      <Input
-                        className="h-9 text-center"
-                        type="number"
-                        min={0}
-                        value={cupoEdits[promotor.usuario_id] ?? ""}
-                        onChange={(event) =>
-                          setCupoEdits((prev) => ({
-                            ...prev,
-                            [promotor.usuario_id]: event.target.value,
-                          }))
-                        }
-                      />
-                    </TableCell>
-                    <TableCell className="text-center font-medium">
-                      {promotor.cupo_vendido}
-                    </TableCell>
-                    <TableCell className="text-center font-medium">
-                      {promotor.cupo_disponible}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        size="sm"
-                        disabled={
-                          savingCupos[promotor.usuario_id] ||
-                          !formData.eventoId ||
-                          !selectedEntrada
-                        }
-                        onClick={async () => {
-                          const cupoTotal = Number(
-                            cupoEdits[promotor.usuario_id],
-                          );
-                          if (Number.isNaN(cupoTotal) || cupoTotal < 0) {
-                            toast({
-                              title: "Cupo inválido",
-                              description:
-                                "Ingresá un número válido para el cupo total.",
-                              variant: "destructive",
-                            });
-                            return;
-                          }
-                          setSavingCupos((prev) => ({
-                            ...prev,
-                            [promotor.usuario_id]: true,
-                          }));
-                          try {
-                            await api.post("/promotores_cupos", {
-                              usuario_id: promotor.usuario_id,
-                              evento_id: Number(formData.eventoId),
-                              entrada_id: selectedEntrada?.id,
-                              cupo_total: cupoTotal,
-                            });
-                            await fetchPromotorCupos(
-                              formData.eventoId,
-                              selectedEntrada?.id ?? 0,
-                            );
-                            toast({
-                              title: "Cupo actualizado",
-                              description: `Se actualizó el cupo de ${promotor.usuario_nombre}.`,
-                            });
-                          } catch (error) {
-                            console.error(
-                              "Error actualizando cupo de promotor:",
-                              error,
-                            );
-                            toast({
-                              title: "No se pudo actualizar",
-                              description: "Reintentá en unos segundos.",
-                              variant: "destructive",
-                            });
-                          } finally {
-                            setSavingCupos((prev) => ({
-                              ...prev,
-                              [promotor.usuario_id]: false,
-                            }));
-                          }
-                        }}
-                      >
-                        Guardar
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-4xl font-bold text-foreground mb-2">

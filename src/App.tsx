@@ -9,6 +9,7 @@ import Entradas from "./pages/Entradas";
 import Eventos from "./pages/Eventos";
 import Listas from "./pages/Listas";
 import Anticipadas from "./pages/Anticipadas";
+import Promotores from "./pages/Promotores";
 import Configuracion from "./pages/Configuracion";
 import Usuarios from "./pages/Usuarios";
 import NotFound from "./pages/NotFound";
@@ -36,6 +37,7 @@ const App = () => (
                 <Route path="/eventos" element={<Eventos />} />
                 <Route path="/listas" element={<Listas />} />
                 <Route path="/anticipadas" element={<Anticipadas />} />
+                <Route path="/promotores" element={<Promotores />} />
                 <Route path="/usuarios" element={<Usuarios />} />
                 <Route path="/configuracion" element={<Configuracion />} />
                 <Route path="*" element={<NotFound />} />

@@ -6,6 +6,7 @@ import {
   Users,
   Settings,
   UserPlus,
+  UserRound,
   LogOut,
   X,
   type LucideIcon,
@@ -41,6 +42,12 @@ const navigation: NavigationItem[] = [
     href: "/anticipadas",
     icon: TicketCheck,
     allowedRoles: ["admin", "vendedor"],
+  },
+  {
+    name: "Promotores",
+    href: "/promotores",
+    icon: UserRound,
+    allowedRoles: ["admin"],
   },
   {
     name: "Eventos",
@@ -79,7 +86,7 @@ export function Sidebar({ isMobileOpen, onMobileClose }: SidebarProps) {
     user?.roleSlug ??
     normalizeRoleSlug(user?.rol_slug ?? user?.rol_nombre ?? null);
   const availableNavigation = navigation.filter(
-    (item) => !item.allowedRoles || item.allowedRoles.includes(roleSlug)
+    (item) => !item.allowedRoles || item.allowedRoles.includes(roleSlug),
   );
 
   const isMobile = useIsMobile();
@@ -95,7 +102,7 @@ export function Sidebar({ isMobileOpen, onMobileClose }: SidebarProps) {
       className={cn(
         "fixed left-0 top-0 z-50 flex h-screen w-64 flex-col border-r border-border bg-sidebar shadow-lg transition-transform duration-300",
         isMobileOpen ? "translate-x-0" : "-translate-x-full",
-        "lg:translate-x-0"
+        "lg:translate-x-0",
       )}
     >
       <div className="flex h-full flex-col gap-y-5 overflow-y-auto px-4 py-6">
@@ -127,7 +134,7 @@ export function Sidebar({ isMobileOpen, onMobileClose }: SidebarProps) {
                   className={cn(
                     "group flex items-center gap-x-3 rounded-lg px-3 py-3 text-sm font-semibold leading-6",
                     "text-sidebar-foreground hover:bg-sidebar-accent hover:text-primary",
-                    "transition-all duration-200"
+                    "transition-all duration-200",
                   )}
                   activeClassName="bg-sidebar-accent text-primary shadow-glow-primary"
                   onClick={handleNavigate}
