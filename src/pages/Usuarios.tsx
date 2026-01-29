@@ -113,7 +113,7 @@ const getErrorMessage = (error: unknown): string => {
 
 export default function Usuarios() {
   const [formState, setFormState] = useState<FormState>(() =>
-    createEmptyFormState()
+    createEmptyFormState(),
   );
   const [roles, setRoles] = useState<Role[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -243,8 +243,8 @@ export default function Usuarios() {
     } else {
       const wantsPasswordChange = Boolean(
         formState.currentPassword ||
-          formState.newPassword ||
-          formState.confirmNewPassword
+        formState.newPassword ||
+        formState.confirmNewPassword,
       );
 
       if (wantsPasswordChange) {
@@ -391,7 +391,7 @@ export default function Usuarios() {
   const isEditing = isEditingUser;
   const deleteTargetIsAdmin = requiresAdminPassword(userToDelete);
   const isDeletingSelected = Boolean(
-    userToDelete && deletingId !== null && deletingId === userToDelete.id
+    userToDelete && deletingId !== null && deletingId === userToDelete.id,
   );
 
   return (
@@ -516,7 +516,7 @@ export default function Usuarios() {
                   />
                 </div>
                 <div className="grid gap-2">
-                  <Label>Correo electrónico</Label>
+                  <Label>Confirmar contraseña</Label>
                   <Input
                     type="password"
                     autoComplete="new-password"
