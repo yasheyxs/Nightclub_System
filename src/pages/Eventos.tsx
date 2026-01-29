@@ -53,7 +53,7 @@ export default function Eventos() {
         return d >= today;
       })
       .sort(
-        (a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime()
+        (a, b) => new Date(a.fecha).getTime() - new Date(b.fecha).getTime(),
       );
   }, []);
 
@@ -137,7 +137,7 @@ export default function Eventos() {
           capacidad: parseInt(form.capacidad, 10),
         });
         setEvents((prev) =>
-          onlyFutureSorted(prev.map((e) => (e.id === data.id ? data : e)))
+          onlyFutureSorted(prev.map((e) => (e.id === data.id ? data : e))),
         );
         toast({
           title: "Evento actualizado",
@@ -182,7 +182,7 @@ export default function Eventos() {
     try {
       await api.delete(`/eventos?id=${deleteTarget.id}`);
       setEvents((prev) =>
-        onlyFutureSorted(prev.filter((e) => e.id !== deleteTarget.id))
+        onlyFutureSorted(prev.filter((e) => e.id !== deleteTarget.id)),
       );
       toast({
         title: "Evento eliminado",
@@ -238,7 +238,7 @@ export default function Eventos() {
         toast({
           title: "Nueva fecha",
           description: `Creá un evento para el ${date.toLocaleDateString(
-            "es-AR"
+            "es-AR",
           )}`,
         });
       }

@@ -49,6 +49,7 @@ interface AnticipadaResponse {
   dni?: string | null;
   entrada_id: number;
   evento_id?: number | null;
+  promotor_id?: number | null;
   cantidad?: number | null;
   incluye_trago?: boolean;
   entrada_nombre?: string | null;
@@ -78,6 +79,17 @@ interface EventoOption {
   fecha: string | null;
 }
 
+interface PromotorCupo {
+  id?: number | null;
+  usuario_id: number;
+  usuario_nombre: string;
+  evento_id: number;
+  entrada_id: number;
+  cupo_total: number;
+  cupo_vendido: number;
+  cupo_disponible: number;
+}
+
 const normalizeEntradaName = (name: string) =>
   name
     .normalize("NFD")
@@ -102,6 +114,9 @@ export default function Anticipadas() {
   const [eventos, setEventos] = useState<EventoOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [optionsLoading, setOptionsLoading] = useState(true);
+  const [cuposLoading, setCuposLoading] = useState(false);
+  const [savingCupos, setSavingCupos] = useState<Record<number, boolean>>({});
+  const [cupoEdits, setCupoEdits] = useState<Record<number, string>>({});
   const [formOpen, setFormOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [printingId, setPrintingId] = useState<number | null>(null);
@@ -109,11 +124,13 @@ export default function Anticipadas() {
   const [deleteTarget, setDeleteTarget] = useState<AnticipadaItem | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [promotorCupos, setPromotorCupos] = useState<PromotorCupo[]>([]);
   const [formData, setFormData] = useState({
     nombre: "",
     dni: "",
     entradaId: "",
     eventoId: "",
+    promotorId: "",
     cantidad: 1,
     incluyeTrago: false,
   });
@@ -155,7 +172,7 @@ export default function Anticipadas() {
       ]);
 
       const anticipadasOptions = (entradasRes.data ?? []).filter(
-        (entrada) => normalizeEntradaName(entrada.nombre) === "anticipada"
+        (entrada) => normalizeEntradaName(entrada.nombre) === "anticipada",
       );
       setEntradasAnticipadas(anticipadasOptions);
 
@@ -196,11 +213,73 @@ export default function Anticipadas() {
     }
   };
 
+  const fetchPromotorCupos = async (eventoId: string, entradaId: number) => {
+    if (!eventoId || !entradaId) {
+      setPromotorCupos([]);
+      return;
+    }
+    setCuposLoading(true);
+    try {
+      const { data } = await api.get<PromotorCupo[]>("/promotores_cupos", {
+        params: {
+          evento_id: Number(eventoId),
+          entrada_id: entradaId,
+        },
+      });
+      const cupos = data ?? [];
+      setPromotorCupos(cupos);
+      setCupoEdits((prev) => {
+        const next = { ...prev };
+        cupos.forEach((cupo) => {
+          next[cupo.usuario_id] = String(cupo.cupo_total);
+        });
+        return next;
+      });
+      setFormData((prev) => {
+        if (cupos.length === 0) {
+          return { ...prev, promotorId: "" };
+        }
+        const currentId = Number(prev.promotorId);
+        const exists = cupos.some((cupo) => cupo.usuario_id === currentId);
+        if (!exists) {
+          return { ...prev, promotorId: String(cupos[0].usuario_id) };
+        }
+        return prev;
+      });
+    } catch (error) {
+      console.error("Error cargando cupos de promotores:", error);
+      toast({
+        title: "Error",
+        description: "No se pudieron cargar los cupos de promotores.",
+        variant: "destructive",
+      });
+      setPromotorCupos([]);
+    } finally {
+      setCuposLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchAnticipadas();
     fetchOptions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const selectedEntrada = entradasAnticipadas[0] ?? null;
+  const entradaPrice = selectedEntrada?.precio_base ?? null;
+  const totalPrice =
+    entradaPrice !== null
+      ? Math.max(1, formData.cantidad) * entradaPrice
+      : null;
+
+  useEffect(() => {
+    if (!formData.eventoId || !selectedEntrada?.id) {
+      setPromotorCupos([]);
+      return;
+    }
+    fetchPromotorCupos(formData.eventoId, selectedEntrada.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.eventoId, selectedEntrada?.id]);
 
   const filteredAnticipadas = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -208,7 +287,7 @@ export default function Anticipadas() {
     return anticipadas.filter((item) =>
       `${item.nombre} ${item.dni} ${item.eventoNombre} ${item.entradaNombre}`
         .toLowerCase()
-        .includes(query)
+        .includes(query),
     );
   }, [anticipadas, search]);
 
@@ -252,6 +331,24 @@ export default function Anticipadas() {
       return;
     }
 
+    if (!formData.eventoId) {
+      toast({
+        title: "Evento requerido",
+        description: "Seleccioná un evento para validar el cupo del promotor.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!formData.promotorId) {
+      toast({
+        title: "Promotor requerido",
+        description: "Seleccioná el promotor que realiza la venta.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setCreating(true);
     try {
       const { data } = await api.post("/anticipadas", {
@@ -259,6 +356,7 @@ export default function Anticipadas() {
         nombre: formData.nombre.trim(),
         dni: formData.dni.trim(),
         evento_id: formData.eventoId ? Number(formData.eventoId) : null,
+        promotor_id: Number(formData.promotorId),
         cantidad: formData.cantidad,
         incluye_trago: formData.incluyeTrago,
       });
@@ -276,9 +374,12 @@ export default function Anticipadas() {
       }
     } catch (error) {
       console.error("Error al registrar anticipada:", error);
+      const apiMessage =
+        (error as { response?: { data?: { error?: string } } })?.response?.data
+          ?.error ?? "Revisá los datos e intentá nuevamente.";
       toast({
         title: "No se pudo registrar",
-        description: "Revisá los datos e intentá nuevamente.",
+        description: apiMessage,
         variant: "destructive",
       });
     } finally {
@@ -296,7 +397,7 @@ export default function Anticipadas() {
       });
 
       setAnticipadas((prev) =>
-        prev.filter((anticipada) => anticipada.id !== deleteTarget.id)
+        prev.filter((anticipada) => anticipada.id !== deleteTarget.id),
       );
       toast({
         title: "Registro eliminado",
@@ -316,16 +417,190 @@ export default function Anticipadas() {
     }
   };
 
-  const selectedEntrada = entradasAnticipadas[0] ?? null;
-
-  const entradaPrice = selectedEntrada?.precio_base ?? null;
-  const totalPrice =
-    entradaPrice !== null
-      ? Math.max(1, formData.cantidad) * entradaPrice
-      : null;
+  const selectedPromotor = promotorCupos.find(
+    (promotor) => String(promotor.usuario_id) === formData.promotorId,
+  );
 
   return (
     <div className="space-y-6 animate-fade-in">
+      <Card className="border-border">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-lg font-semibold">
+            Cupos de promotores
+          </CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Editá el cupo total por promotor para las anticipadas del evento
+            seleccionado.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Evento</Label>
+              <Select
+                value={formData.eventoId}
+                onValueChange={(value) =>
+                  setFormData({
+                    ...formData,
+                    eventoId: value === "none" ? "" : value,
+                  })
+                }
+                disabled={optionsLoading}
+              >
+                <SelectTrigger className="h-11">
+                  <SelectValue placeholder="Seleccioná un evento" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Sin evento asignado</SelectItem>
+                  {eventos.map((evento) => (
+                    <SelectItem key={evento.id} value={String(evento.id)}>
+                      {evento.nombre}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Entrada anticipada</Label>
+              <div className="rounded-lg border border-border bg-muted/30 px-4 py-3">
+                {optionsLoading ? (
+                  <p className="text-sm text-muted-foreground">
+                    Cargando opciones...
+                  </p>
+                ) : selectedEntrada ? (
+                  <div>
+                    <p className="font-semibold text-foreground">
+                      {selectedEntrada.nombre}
+                    </p>
+                    {entradaPrice !== null && (
+                      <p className="text-xs text-muted-foreground">
+                        Precio actual: ${entradaPrice}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    No hay una entrada anticipada configurada.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {cuposLoading ? (
+            <div className="flex items-center text-muted-foreground text-sm py-6">
+              <Loader2 className="h-4 w-4 animate-spin mr-2" /> Cargando cupos
+              de promotores...
+            </div>
+          ) : promotorCupos.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No hay promotores disponibles para este evento.
+            </p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Promotor</TableHead>
+                  <TableHead className="text-center">Cupo total</TableHead>
+                  <TableHead className="text-center">Vendido</TableHead>
+                  <TableHead className="text-center">Disponible</TableHead>
+                  <TableHead className="text-right">Acciones</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {promotorCupos.map((promotor) => (
+                  <TableRow key={promotor.usuario_id}>
+                    <TableCell className="font-semibold text-foreground">
+                      {promotor.usuario_nombre}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Input
+                        className="h-9 text-center"
+                        type="number"
+                        min={0}
+                        value={cupoEdits[promotor.usuario_id] ?? ""}
+                        onChange={(event) =>
+                          setCupoEdits((prev) => ({
+                            ...prev,
+                            [promotor.usuario_id]: event.target.value,
+                          }))
+                        }
+                      />
+                    </TableCell>
+                    <TableCell className="text-center font-medium">
+                      {promotor.cupo_vendido}
+                    </TableCell>
+                    <TableCell className="text-center font-medium">
+                      {promotor.cupo_disponible}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        size="sm"
+                        disabled={
+                          savingCupos[promotor.usuario_id] ||
+                          !formData.eventoId ||
+                          !selectedEntrada
+                        }
+                        onClick={async () => {
+                          const cupoTotal = Number(
+                            cupoEdits[promotor.usuario_id],
+                          );
+                          if (Number.isNaN(cupoTotal) || cupoTotal < 0) {
+                            toast({
+                              title: "Cupo inválido",
+                              description:
+                                "Ingresá un número válido para el cupo total.",
+                              variant: "destructive",
+                            });
+                            return;
+                          }
+                          setSavingCupos((prev) => ({
+                            ...prev,
+                            [promotor.usuario_id]: true,
+                          }));
+                          try {
+                            await api.post("/promotores_cupos", {
+                              usuario_id: promotor.usuario_id,
+                              evento_id: Number(formData.eventoId),
+                              entrada_id: selectedEntrada?.id,
+                              cupo_total: cupoTotal,
+                            });
+                            await fetchPromotorCupos(
+                              formData.eventoId,
+                              selectedEntrada?.id ?? 0,
+                            );
+                            toast({
+                              title: "Cupo actualizado",
+                              description: `Se actualizó el cupo de ${promotor.usuario_nombre}.`,
+                            });
+                          } catch (error) {
+                            console.error(
+                              "Error actualizando cupo de promotor:",
+                              error,
+                            );
+                            toast({
+                              title: "No se pudo actualizar",
+                              description: "Reintentá en unos segundos.",
+                              variant: "destructive",
+                            });
+                          } finally {
+                            setSavingCupos((prev) => ({
+                              ...prev,
+                              [promotor.usuario_id]: false,
+                            }));
+                          }
+                        }}
+                      >
+                        Guardar
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-4xl font-bold text-foreground mb-2">
@@ -460,7 +735,7 @@ export default function Anticipadas() {
                                 {
                                   month: "short",
                                   day: "numeric",
-                                }
+                                },
                               )}`
                             : ""}
                         </SelectItem>
@@ -468,20 +743,52 @@ export default function Anticipadas() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="flex items-center justify-between gap-3 border border-border rounded-lg px-4 py-3">
-                  <div>
-                    <p className="font-medium">Incluye trago</p>
-                    <p className="text-sm text-muted-foreground">
-                      Agregá el beneficio al ticket impreso.
-                    </p>
-                  </div>
-                  <Switch
-                    checked={formData.incluyeTrago}
-                    onCheckedChange={(checked) =>
-                      setFormData({ ...formData, incluyeTrago: checked })
+                <div className="space-y-2">
+                  <Label>Promotor</Label>
+                  <Select
+                    value={formData.promotorId}
+                    onValueChange={(value) =>
+                      setFormData({
+                        ...formData,
+                        promotorId: value,
+                      })
                     }
-                  />
+                    disabled={cuposLoading || promotorCupos.length === 0}
+                  >
+                    <SelectTrigger className="h-11">
+                      <SelectValue placeholder="Seleccioná un promotor" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {promotorCupos.map((promotor) => (
+                        <SelectItem
+                          key={promotor.usuario_id}
+                          value={String(promotor.usuario_id)}
+                        >
+                          {promotor.usuario_nombre}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {selectedPromotor && (
+                    <p className="text-xs text-muted-foreground">
+                      Cupo disponible: {selectedPromotor.cupo_disponible}
+                    </p>
+                  )}
                 </div>
+              </div>
+              <div className="flex items-center justify-between gap-3 border border-border rounded-lg px-4 py-3">
+                <div>
+                  <p className="font-medium">Incluye trago</p>
+                  <p className="text-sm text-muted-foreground">
+                    Agregá el beneficio al ticket impreso.
+                  </p>
+                </div>
+                <Switch
+                  checked={formData.incluyeTrago}
+                  onCheckedChange={(checked) =>
+                    setFormData({ ...formData, incluyeTrago: checked })
+                  }
+                />
               </div>
 
               <div className="flex gap-3 flex-col md:flex-row md:justify-end">

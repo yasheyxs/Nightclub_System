@@ -96,9 +96,23 @@ try {
             dni TEXT,
             entrada_id INTEGER NOT NULL,
             evento_id INTEGER,
+            promotor_id INTEGER,
             cantidad INTEGER NOT NULL DEFAULT 1,
             incluye_trago BOOLEAN NOT NULL DEFAULT FALSE,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+    SQL);
+    $pdo->exec("ALTER TABLE anticipadas ADD COLUMN IF NOT EXISTS promotor_id INTEGER");
+
+    $pdo->exec(<<<SQL
+        CREATE TABLE IF NOT EXISTS promotores_cupos (
+            id SERIAL PRIMARY KEY,
+            usuario_id INTEGER NOT NULL,
+            evento_id INTEGER NOT NULL,
+            entrada_id INTEGER NOT NULL,
+            cupo_total INTEGER NOT NULL DEFAULT 50,
+            cupo_vendido INTEGER NOT NULL DEFAULT 0,
+            fecha_creacion TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
         );
     SQL);
 
@@ -112,6 +126,7 @@ try {
                 a.dni,
                 a.entrada_id,
                 a.evento_id,
+                a.promotor_id,
                 a.cantidad,
                 a.incluye_trago,
                 e.nombre AS entrada_nombre,
@@ -132,6 +147,7 @@ try {
             $row['incluye_trago'] = filter_var($row['incluye_trago'], FILTER_VALIDATE_BOOLEAN);
             $row['entrada_precio'] = isset($row['entrada_precio']) ? (float) $row['entrada_precio'] : 0.0;
             $row['evento_id'] = isset($row['evento_id']) ? (int) $row['evento_id'] : null;
+            $row['promotor_id'] = isset($row['promotor_id']) ? (int) $row['promotor_id'] : null;
         }
 
         echo json_encode($anticipadas, JSON_UNESCAPED_UNICODE);
@@ -151,6 +167,7 @@ try {
             $cantidad = isset($input['cantidad']) ? max(1, (int)$input['cantidad']) : 1;
             $incluyeTrago = filter_var($input['incluye_trago'] ?? false, FILTER_VALIDATE_BOOLEAN);
             $incluyeTragoValor = $incluyeTrago ? 'true' : 'false';
+            $promotorId = isset($input['promotor_id']) ? (int) $input['promotor_id'] : null;
 
             if ($nombre === '') {
                 http_response_code(400);
@@ -158,7 +175,19 @@ try {
                 exit;
             }
 
-            // 🔥 BUSCAR AUTOMÁTICAMENTE LA ENTRADA "ANTICIPADA"
+            if (!$promotorId) {
+                http_response_code(400);
+                echo json_encode(['error' => 'Debe indicar un promotor para asignar el cupo.']);
+                exit;
+            }
+
+            if ($eventoId === null) {
+                http_response_code(400);
+                echo json_encode(['error' => 'Debe indicar un evento para validar el cupo.']);
+                exit;
+            }
+
+            // BUSCAR AUTOMÁTICAMENTE LA ENTRADA "ANTICIPADA"
             $entradaStmt = $pdo->prepare("
                 SELECT id, precio_base
                 FROM entradas
@@ -180,9 +209,64 @@ try {
             $pdo->beginTransaction();
 
             try {
+                $cupoStmt = $pdo->prepare(<<<SQL
+                    SELECT id, cupo_total, cupo_vendido
+                    FROM promotores_cupos
+                    WHERE usuario_id = :usuario_id
+                      AND evento_id = :evento_id
+                      AND entrada_id = :entrada_id
+                    ORDER BY id ASC
+                    FOR UPDATE
+                    LIMIT 1;
+                SQL);
+                $cupoStmt->execute([
+                    ':usuario_id' => $promotorId,
+                    ':evento_id' => $eventoId,
+                    ':entrada_id' => $entradaId,
+                ]);
+                $cupo = $cupoStmt->fetch();
+
+                if (!$cupo) {
+                    $insertCupoStmt = $pdo->prepare(<<<SQL
+                        INSERT INTO promotores_cupos (usuario_id, evento_id, entrada_id)
+                        VALUES (:usuario_id, :evento_id, :entrada_id)
+                        RETURNING id, cupo_total, cupo_vendido;
+                    SQL);
+                    $insertCupoStmt->execute([
+                        ':usuario_id' => $promotorId,
+                        ':evento_id' => $eventoId,
+                        ':entrada_id' => $entradaId,
+                    ]);
+                    $cupo = $insertCupoStmt->fetch();
+                }
+
+                $cupoTotal = isset($cupo['cupo_total']) ? (int) $cupo['cupo_total'] : 0;
+                $cupoVendido = isset($cupo['cupo_vendido']) ? (int) $cupo['cupo_vendido'] : 0;
+                $cupoDisponible = $cupoTotal - $cupoVendido;
+
+                if ($cantidad > $cupoDisponible) {
+                    $pdo->rollBack();
+                    http_response_code(409);
+                    echo json_encode([
+                        'error' => 'No hay cupo suficiente para esta venta.',
+                        'cupo_disponible' => $cupoDisponible,
+                    ]);
+                    exit;
+                }
+
+                $updateCupoStmt = $pdo->prepare(<<<SQL
+                    UPDATE promotores_cupos
+                    SET cupo_vendido = cupo_vendido + :cantidad
+                    WHERE id = :id;
+                SQL);
+                $updateCupoStmt->execute([
+                    ':cantidad' => $cantidad,
+                    ':id' => $cupo['id'],
+                ]);
+
                 $stmt = $pdo->prepare(<<<SQL
-                    INSERT INTO anticipadas (nombre, dni, entrada_id, evento_id, cantidad, incluye_trago)
-                    VALUES (:nombre, :dni, :entrada_id, :evento_id, :cantidad, CAST(:incluye_trago AS boolean))
+                    INSERT INTO anticipadas (nombre, dni, entrada_id, evento_id, promotor_id, cantidad, incluye_trago)
+                    VALUES (:nombre, :dni, :entrada_id, :evento_id, :promotor_id, :cantidad, CAST(:incluye_trago AS boolean))
                     RETURNING id;
                 SQL);
 
@@ -190,7 +274,8 @@ try {
                     ':nombre' => $nombre,
                     ':dni' => $dni ?: null,
                     ':entrada_id' => $entradaId,
-                    ':evento_id' => $eventoId ?: null,
+                    ':evento_id' => $eventoId,
+                    ':promotor_id' => $promotorId,
                     ':cantidad' => $cantidad,
                     ':incluye_trago' => $incluyeTragoValor,
                 ]);
@@ -219,6 +304,7 @@ try {
                         a.dni,
                         a.entrada_id,
                         a.evento_id,
+                        a.promotor_id,
                         a.cantidad,
                         a.incluye_trago,
                         e.nombre AS entrada_nombre,
@@ -241,6 +327,7 @@ try {
                     $nuevaAnticipada['incluye_trago'] = filter_var($nuevaAnticipada['incluye_trago'], FILTER_VALIDATE_BOOLEAN);
                     $nuevaAnticipada['entrada_precio'] = isset($nuevaAnticipada['entrada_precio']) ? (float)$nuevaAnticipada['entrada_precio'] : 0.0;
                     $nuevaAnticipada['evento_id'] = isset($nuevaAnticipada['evento_id']) ? (int)$nuevaAnticipada['evento_id'] : null;
+                    $nuevaAnticipada['promotor_id'] = isset($nuevaAnticipada['promotor_id']) ? (int) $nuevaAnticipada['promotor_id'] : null;
                 }
 
                 $pdo->commit();

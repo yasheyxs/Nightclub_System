@@ -1,12 +1,8 @@
 <?php
-// router.php — manejador universal con CORS y endpoint de impresión
-
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
-header("Content-Type: application/json; charset=utf-8");
 
-// Responder preflight
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);
     exit;
@@ -15,19 +11,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 $uriPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 $requestedFile = __DIR__ . $uriPath;
 
-// Si el archivo solicitado existe, permitir que el servidor embebido lo sirva
 if (is_file($requestedFile)) {
     return false;
 }
 
-// Normalizar datos de entrada
 $rawBody = file_get_contents('php://input');
-$decodedJson = json_decode($rawBody, true);
-$printerName = $_POST['printerName'] ?? ($decodedJson['printerName'] ?? null);
-$filePath = $_POST['filePath'] ?? ($decodedJson['filePath'] ?? null);
+$decodedJson = json_decode($rawBody, true) ?? [];
 
-// Solo aceptamos POST hacia "/print" (o la raíz como alias)
+header("Content-Type: application/json; charset=utf-8");
+
+/* =========================
+   API ROUTER
+========================= */
+
+if (str_starts_with($uriPath, '/api/')) {
+    require __DIR__ . '/api/index.php';
+    exit;
+}
+
+/* =========================
+   PRINT ROUTER
+========================= */
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($uriPath === '/' || $uriPath === '/print')) {
+    $printerName = $_POST['printerName'] ?? ($decodedJson['printerName'] ?? null);
+    $filePath = $_POST['filePath'] ?? ($decodedJson['filePath'] ?? null);
+
     if (!$printerName || !$filePath) {
         http_response_code(400);
         echo json_encode([
@@ -41,16 +50,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($uriPath === '/' || $uriPath === '
         http_response_code(404);
         echo json_encode([
             'success' => false,
-            'message' => 'El archivo no existe en la ruta especificada.',
+            'message' => 'El archivo no existe en la ruta especificada.'
         ]);
         exit;
     }
 
-    $scriptsDir = __DIR__ . DIRECTORY_SEPARATOR . 'scripts' . DIRECTORY_SEPARATOR;
+    $scriptsDir = __DIR__ . '/scripts/';
     $nodeScript = $scriptsDir . 'windows-print.js';
     $psScript = $scriptsDir . 'windows-print.ps1';
 
-    $command = null;
     if (is_file($nodeScript)) {
         $command = sprintf(
             'node %s %s %s 2>&1',
@@ -65,40 +73,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($uriPath === '/' || $uriPath === '
             escapeshellarg($printerName),
             escapeshellarg($filePath)
         );
-    }
-
-    if ($command === null) {
+    } else {
         http_response_code(500);
         echo json_encode([
             'success' => false,
-            'message' => 'No se encontró ningún script de impresión disponible.',
+            'message' => 'No se encontró ningún script de impresión.'
         ]);
         exit;
     }
 
-    $output = [];
-    $exitCode = 0;
     exec($command, $output, $exitCode);
 
     if ($exitCode === 0) {
-        http_response_code(200);
         echo json_encode([
             'success' => true,
             'message' => 'Trabajo de impresión enviado correctamente.',
-            'output' => $output,
+            'output' => $output
         ]);
     } else {
         http_response_code(500);
         echo json_encode([
             'success' => false,
-            'message' => 'Error al ejecutar el comando de impresión.',
+            'message' => 'Error al ejecutar impresión.',
             'output' => $output,
-            'exitCode' => $exitCode,
+            'exitCode' => $exitCode
         ]);
     }
     exit;
 }
 
-// Respuesta por defecto para rutas no manejadas
 http_response_code(404);
 echo json_encode(['error' => 'Ruta no encontrada']);
