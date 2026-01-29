@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/table";
 import { toast } from "@/hooks/use-toast";
 import { api } from "@/services/api";
-import { Loader2 } from "lucide-react";
+import { Loader2, Save } from "lucide-react";
 
 interface EntradaOption {
   id: number;
@@ -60,7 +60,7 @@ export default function Promotores() {
   const [cuposLoading, setCuposLoading] = useState(false);
   const [promotorCupos, setPromotorCupos] = useState<PromotorCupo[]>([]);
   const [cupoEdits, setCupoEdits] = useState<Record<number, string>>({});
-  const [savingCupos, setSavingCupos] = useState<Record<number, boolean>>({});
+  const [savingAllCupos, setSavingAllCupos] = useState(false);
   const [selectedEventoId, setSelectedEventoId] = useState("");
 
   const fetchOptions = async () => {
@@ -150,6 +150,61 @@ export default function Promotores() {
     fetchPromotorCupos(selectedEventoId, selectedEntrada.id);
   }, [selectedEventoId, selectedEntrada?.id]);
 
+  const handleSaveAllCupos = async () => {
+    if (!selectedEventoId || !selectedEntrada) {
+      return;
+    }
+    if (promotorCupos.length === 0) {
+      toast({
+        title: "Sin promotores",
+        description: "No hay cupos para actualizar.",
+      });
+      return;
+    }
+    const cuposPayload = promotorCupos.map((promotor) => {
+      const cupoTotal = Number(cupoEdits[promotor.usuario_id]);
+      return { promotor, cupoTotal };
+    });
+    const invalidCupo = cuposPayload.find(
+      ({ cupoTotal }) => Number.isNaN(cupoTotal) || cupoTotal < 0,
+    );
+    if (invalidCupo) {
+      toast({
+        title: "Cupo inválido",
+        description: "Ingresá un número válido para todos los cupos.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setSavingAllCupos(true);
+    try {
+      await Promise.all(
+        cuposPayload.map(({ promotor, cupoTotal }) =>
+          api.post("/promotores_cupos", {
+            usuario_id: promotor.usuario_id,
+            evento_id: Number(selectedEventoId),
+            entrada_id: selectedEntrada.id,
+            cupo_total: cupoTotal,
+          }),
+        ),
+      );
+      await fetchPromotorCupos(selectedEventoId, selectedEntrada.id);
+      toast({
+        title: "Cupos actualizados",
+        description: "Se actualizaron los cupos de todos los promotores.",
+      });
+    } catch (error) {
+      console.error("Error actualizando cupos de promotores:", error);
+      toast({
+        title: "No se pudo actualizar",
+        description: "Reintentá en unos segundos.",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingAllCupos(false);
+    }
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div>
@@ -237,7 +292,6 @@ export default function Promotores() {
                   <TableHead className="text-center">Cupo total</TableHead>
                   <TableHead className="text-center">Vendido</TableHead>
                   <TableHead className="text-center">Disponible</TableHead>
-                  <TableHead className="text-right">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -266,72 +320,33 @@ export default function Promotores() {
                     <TableCell className="text-center font-medium">
                       {promotor.cupo_disponible}
                     </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        size="sm"
-                        disabled={
-                          savingCupos[promotor.usuario_id] ||
-                          !selectedEventoId ||
-                          !selectedEntrada
-                        }
-                        onClick={async () => {
-                          const cupoTotal = Number(
-                            cupoEdits[promotor.usuario_id],
-                          );
-                          if (Number.isNaN(cupoTotal) || cupoTotal < 0) {
-                            toast({
-                              title: "Cupo inválido",
-                              description:
-                                "Ingresá un número válido para el cupo total.",
-                              variant: "destructive",
-                            });
-                            return;
-                          }
-                          setSavingCupos((prev) => ({
-                            ...prev,
-                            [promotor.usuario_id]: true,
-                          }));
-                          try {
-                            await api.post("/promotores_cupos", {
-                              usuario_id: promotor.usuario_id,
-                              evento_id: Number(selectedEventoId),
-                              entrada_id: selectedEntrada?.id,
-                              cupo_total: cupoTotal,
-                            });
-                            await fetchPromotorCupos(
-                              selectedEventoId,
-                              selectedEntrada?.id ?? 0,
-                            );
-                            toast({
-                              title: "Cupo actualizado",
-                              description: `Se actualizó el cupo de ${promotor.usuario_nombre}.`,
-                            });
-                          } catch (error) {
-                            console.error(
-                              "Error actualizando cupo de promotor:",
-                              error,
-                            );
-                            toast({
-                              title: "No se pudo actualizar",
-                              description: "Reintentá en unos segundos.",
-                              variant: "destructive",
-                            });
-                          } finally {
-                            setSavingCupos((prev) => ({
-                              ...prev,
-                              [promotor.usuario_id]: false,
-                            }));
-                          }
-                        }}
-                      >
-                        Guardar
-                      </Button>
-                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
           )}
+          {promotorCupos.length > 0 && !cuposLoading ? (
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={
+                  savingAllCupos ||
+                  !selectedEventoId ||
+                  !selectedEntrada ||
+                  promotorCupos.length === 0
+                }
+                onClick={handleSaveAllCupos}
+              >
+                {savingAllCupos ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="mr-2 h-4 w-4" />
+                )}
+                Guardar cambios
+              </Button>
+            </div>
+          ) : null}
         </CardContent>
       </Card>
     </div>
