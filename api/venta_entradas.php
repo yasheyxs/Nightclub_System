@@ -378,23 +378,25 @@ try {
             jsonResponse(400, ['error' => 'La cantidad debe ser mayor a 0.']);
         }
 
-        if ($eventoId !== null) {
-            $eventoActivoStmt = $pdo->prepare("
-                SELECT id, activo
-                FROM eventos
-                WHERE id = :id
-                LIMIT 1
-            ");
-            $eventoActivoStmt->execute([':id' => $eventoId]);
-            $eventoActivo = $eventoActivoStmt->fetch();
+        if ($eventoId === null || $eventoId <= 0) {
+            jsonResponse(400, ['error' => 'El campo evento_id es obligatorio.']);
+        }
 
-            $estaActivo = $eventoActivo && isset($eventoActivo['activo'])
-                ? filter_var($eventoActivo['activo'], FILTER_VALIDATE_BOOLEAN)
-                : false;
+        $eventoActivoStmt = $pdo->prepare("
+            SELECT id, activo
+            FROM eventos
+            WHERE id = :id
+            LIMIT 1
+        ");
+        $eventoActivoStmt->execute([':id' => $eventoId]);
+        $eventoActivo = $eventoActivoStmt->fetch();
 
-            if (!$estaActivo) {
-                jsonResponse(400, ['error' => 'El evento está cerrado o no existe.']);
-            }
+        $estaActivo = $eventoActivo && isset($eventoActivo['activo'])
+            ? filter_var($eventoActivo['activo'], FILTER_VALIDATE_BOOLEAN)
+            : false;
+
+        if (!$estaActivo) {
+            jsonResponse(400, ['error' => 'El evento está cerrado o no existe.']);
         }
 
         $entradaStmt = $pdo->prepare("
@@ -412,6 +414,13 @@ try {
 
         $nombreEntrada = (string)$entrada['nombre'];
         $precioUnitario = (float)$entrada['precio_base'];
+
+        $promotorResponsableId = null;
+        if ($promotorId !== null && $promotorId > 0) {
+            $promotorResponsableId = $promotorId;
+        } elseif ($usuarioId !== null && $usuarioId > 0) {
+            $promotorResponsableId = $usuarioId;
+        }
 
         $insert = $pdo->prepare("
             INSERT INTO ventas_entradas (
@@ -470,46 +479,100 @@ try {
         $tickets = [];
         $pdo->beginTransaction();
 
-        for ($i = 0; $i < $cantidad; $i++) {
-            $qrCodigo = generarQrCodigo();
-            $qrHash = generarQrHash($qrCodigo);
+        try {
+            if ($promotorResponsableId !== null) {
+                $cupoStmt = $pdo->prepare("
+                    SELECT id, cupo_total, cupo_vendido
+                    FROM promotores_cupos
+                    WHERE usuario_id = :usuario_id
+                      AND evento_id = :evento_id
+                      AND entrada_id = :entrada_id
+                    ORDER BY id ASC
+                    FOR UPDATE
+                    LIMIT 1
+                ");
 
-            $insert->execute([
-                ':entrada_id' => $entradaId,
-                ':precio_unitario' => $precioUnitario,
-                ':total' => $precioUnitario,
-                ':evento_id' => $eventoId,
-                ':incluye_trago' => $incluyeTrago,
-                ':usuario_id' => $usuarioId,
-                ':nombre' => $nombre,
-                ':dni' => $dni,
-                ':promotor_id' => $promotorId,
-                ':qr_codigo' => $qrCodigo,
-                ':qr_hash' => $qrHash
-            ]);
+                $cupoStmt->execute([
+                    ':usuario_id' => $promotorResponsableId,
+                    ':evento_id' => $eventoId,
+                    ':entrada_id' => $entradaId,
+                ]);
 
-            $venta = $insert->fetch();
-            $tickets[] = [
-                'id' => (int)$venta['id'],
-                'entrada_id' => (int)$venta['entrada_id'],
-                'evento_id' => $venta['evento_id'] !== null ? (int)$venta['evento_id'] : null,
-                'cantidad' => (int)$venta['cantidad'],
-                'precio_unitario' => (float)$venta['precio_unitario'],
-                'total' => (float)$venta['total'],
-                'incluye_trago' => filter_var($venta['incluye_trago'], FILTER_VALIDATE_BOOLEAN),
-                'fecha_venta' => $venta['fecha_venta'],
-                'estado' => $venta['estado'],
-                'nombre' => $venta['nombre'],
-                'dni' => $venta['dni'],
-                'promotor_id' => $venta['promotor_id'] !== null ? (int)$venta['promotor_id'] : null,
-                'usuario_id' => $venta['usuario_id'] !== null ? (int)$venta['usuario_id'] : null,
-                'qr_codigo' => $venta['qr_codigo'],
-                'qr_hash' => $venta['qr_hash'],
-                'qr_generado_at' => $venta['qr_generado_at']
-            ];
+                $cupo = $cupoStmt->fetch();
+
+                if (!$cupo) {
+                    throw new RuntimeException('El promotor no tiene un cupo configurado para esta entrada en este evento.');
+                }
+
+                $cupoTotal = (int)$cupo['cupo_total'];
+                $cupoVendido = (int)$cupo['cupo_vendido'];
+                $cupoDisponible = $cupoTotal - $cupoVendido;
+
+                if ($cupoDisponible < $cantidad) {
+                    throw new RuntimeException(
+                        'Cupo insuficiente para este promotor. Disponible: ' . $cupoDisponible . '.'
+                    );
+                }
+
+                $updateCupoStmt = $pdo->prepare("
+                    UPDATE promotores_cupos
+                    SET cupo_vendido = cupo_vendido + :cantidad
+                    WHERE id = :id
+                ");
+
+                $updateCupoStmt->execute([
+                    ':cantidad' => $cantidad,
+                    ':id' => (int)$cupo['id'],
+                ]);
+            }
+
+            for ($i = 0; $i < $cantidad; $i++) {
+                $qrCodigo = generarQrCodigo();
+                $qrHash = generarQrHash($qrCodigo);
+
+                $insert->execute([
+                    ':entrada_id' => $entradaId,
+                    ':precio_unitario' => $precioUnitario,
+                    ':total' => $precioUnitario,
+                    ':evento_id' => $eventoId,
+                    ':incluye_trago' => $incluyeTrago,
+                    ':usuario_id' => $usuarioId,
+                    ':nombre' => $nombre,
+                    ':dni' => $dni,
+                    ':promotor_id' => $promotorId,
+                    ':qr_codigo' => $qrCodigo,
+                    ':qr_hash' => $qrHash
+                ]);
+
+                $venta = $insert->fetch();
+                $tickets[] = [
+                    'id' => (int)$venta['id'],
+                    'entrada_id' => (int)$venta['entrada_id'],
+                    'evento_id' => $venta['evento_id'] !== null ? (int)$venta['evento_id'] : null,
+                    'cantidad' => (int)$venta['cantidad'],
+                    'precio_unitario' => (float)$venta['precio_unitario'],
+                    'total' => (float)$venta['total'],
+                    'incluye_trago' => filter_var($venta['incluye_trago'], FILTER_VALIDATE_BOOLEAN),
+                    'fecha_venta' => $venta['fecha_venta'],
+                    'estado' => $venta['estado'],
+                    'nombre' => $venta['nombre'],
+                    'dni' => $venta['dni'],
+                    'promotor_id' => $venta['promotor_id'] !== null ? (int)$venta['promotor_id'] : null,
+                    'usuario_id' => $venta['usuario_id'] !== null ? (int)$venta['usuario_id'] : null,
+                    'qr_codigo' => $venta['qr_codigo'],
+                    'qr_hash' => $venta['qr_hash'],
+                    'qr_generado_at' => $venta['qr_generado_at']
+                ];
+            }
+
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+
+            jsonResponse(400, ['error' => $e->getMessage()]);
         }
-
-        $pdo->commit();
 
         foreach ($tickets as $ticket) {
             $contenido = generarContenidoTicket(

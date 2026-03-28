@@ -65,22 +65,38 @@ export default function Promotores() {
 
   const fetchOptions = async () => {
     setOptionsLoading(true);
+
     try {
       const [entradasRes, eventosRes] = await Promise.all([
-        api.get<EntradaOption[]>("/entradas"),
-        api.get<EventoOption[]>("/eventos?upcoming=1"),
+        api.get("/entradas"),
+        api.get("/eventos?upcoming=1"),
       ]);
 
-      const anticipadasOptions = (entradasRes.data ?? []).filter(
-        (entrada) => normalizeEntradaName(entrada.nombre) === "anticipada",
+      const entradasData = Array.isArray(entradasRes.data)
+        ? entradasRes.data
+        : Array.isArray(entradasRes.data?.data)
+          ? entradasRes.data.data
+          : [];
+
+      const eventosData = Array.isArray(eventosRes.data)
+        ? eventosRes.data
+        : Array.isArray(eventosRes.data?.data)
+          ? eventosRes.data.data
+          : [];
+
+      const anticipadasOptions = entradasData.filter(
+        (entrada: EntradaOption) =>
+          normalizeEntradaName(entrada.nombre) === "anticipada",
       );
+
       setEntradasAnticipadas(anticipadasOptions);
 
-      const mappedEventos = (eventosRes.data ?? []).map((evento) => ({
+      const mappedEventos = eventosData.map((evento: EventoOption) => ({
         id: Number(evento.id),
         nombre: evento.nombre,
         fecha: evento.fecha,
       }));
+
       setEventos(mappedEventos);
 
       if (mappedEventos.length > 0) {

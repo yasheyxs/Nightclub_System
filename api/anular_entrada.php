@@ -177,7 +177,8 @@ try {
             v.qr_codigo,
             v.nombre,
             v.dni,
-            v.observaciones
+            v.observaciones,
+            v.promotor_id
     ");
 
     $observaciones = $usuarioId !== null
@@ -198,6 +199,39 @@ try {
             'ok' => false,
             'error' => 'No se pudieron anular todas las entradas solicitadas. Reintentá.'
         ]);
+    }
+
+    $devolucionesPorPromotor = [];
+
+    foreach ($anuladas as $row) {
+        $promotorId = isset($row['promotor_id']) ? (int)$row['promotor_id'] : 0;
+
+        if ($promotorId > 0) {
+            if (!isset($devolucionesPorPromotor[$promotorId])) {
+                $devolucionesPorPromotor[$promotorId] = 0;
+            }
+
+            $devolucionesPorPromotor[$promotorId]++;
+        }
+    }
+
+    if (!empty($devolucionesPorPromotor)) {
+        $devolverCupoStmt = $pdo->prepare("
+            UPDATE promotores_cupos
+            SET cupo_vendido = GREATEST(cupo_vendido - :cantidad, 0)
+            WHERE usuario_id = :usuario_id
+              AND evento_id = :evento_id
+              AND entrada_id = :entrada_id
+        ");
+
+        foreach ($devolucionesPorPromotor as $promotorId => $cantidadDevolver) {
+            $devolverCupoStmt->execute([
+                ':cantidad' => $cantidadDevolver,
+                ':usuario_id' => $promotorId,
+                ':evento_id' => $eventoId,
+                ':entrada_id' => $entradaId
+            ]);
+        }
     }
 
     $pdo->commit();
@@ -222,7 +256,8 @@ try {
                 'qr_codigo' => $row['qr_codigo'],
                 'nombre' => $row['nombre'],
                 'dni' => $row['dni'],
-                'observaciones' => $row['observaciones']
+                'observaciones' => $row['observaciones'],
+                'promotor_id' => $row['promotor_id'] !== null ? (int)$row['promotor_id'] : null
             ];
         }, $anuladas)
     ]);

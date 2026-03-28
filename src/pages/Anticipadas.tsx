@@ -163,15 +163,43 @@ export default function Anticipadas() {
 
   const fetchOptions = async () => {
     setOptionsLoading(true);
+
     try {
       const [entradasRes, eventosRes] = await Promise.all([
-        api.get<EntradaOption[]>("/entradas"),
-        api.get<EventoOption[]>("/eventos?upcoming=1"),
+        api.get("/entradas"),
+        api.get("/eventos?upcoming=1"),
       ]);
 
-      const anticipadasOptions = (entradasRes.data ?? []).filter(
-        (entrada) => normalizeEntradaName(entrada.nombre) === "anticipada",
-      );
+      const entradasData = Array.isArray(entradasRes.data)
+        ? entradasRes.data
+        : Array.isArray(entradasRes.data?.data)
+          ? entradasRes.data.data
+          : Array.isArray(entradasRes.data?.entradas)
+            ? entradasRes.data.entradas
+            : [];
+
+      const eventosData = Array.isArray(eventosRes.data)
+        ? eventosRes.data
+        : Array.isArray(eventosRes.data?.data)
+          ? eventosRes.data.data
+          : Array.isArray(eventosRes.data?.eventos)
+            ? eventosRes.data.eventos
+            : [];
+
+      const anticipadasOptions = entradasData
+        .map((entrada: EntradaOption) => ({
+          id: Number(entrada.id),
+          nombre: entrada.nombre,
+          precio_base:
+            entrada.precio_base !== undefined && entrada.precio_base !== null
+              ? Number(entrada.precio_base)
+              : null,
+        }))
+        .filter(
+          (entrada: EntradaOption) =>
+            normalizeEntradaName(entrada.nombre) === "anticipada",
+        );
+
       setEntradasAnticipadas(anticipadasOptions);
 
       if (!formData.entradaId && anticipadasOptions.length > 0) {
@@ -180,20 +208,22 @@ export default function Anticipadas() {
           entradaId: String(anticipadasOptions[0].id),
         }));
       }
-      const mappedEventos = (eventosRes.data ?? []).map((evento) => ({
+
+      const mappedEventos = eventosData.map((evento: EventoOption) => ({
         id: Number(evento.id),
         nombre: evento.nombre,
-        fecha: evento.fecha,
+        fecha: evento.fecha ?? null,
       }));
+
       setEventos(mappedEventos);
+
       if (mappedEventos.length > 0) {
-        const proximoEvento = mappedEventos[0]; // el primero siempre es el próximo upcoming
+        const proximoEvento = mappedEventos[0];
         setFormData((prev) => ({
           ...prev,
           eventoId: String(proximoEvento.id),
         }));
       } else {
-        // si NO hay eventos, dejamos none
         setFormData((prev) => ({
           ...prev,
           eventoId: "",

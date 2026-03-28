@@ -57,6 +57,11 @@ if ($uriPath === '/api/validar_qr' || $uriPath === '/api/validar_qr.php') {
     exit;
 }
 
+if ($uriPath === '/api/promotores_cupos' || $uriPath === '/api/promotores_cupos.php') {
+    require __DIR__ . '/api/promotores_cupos.php';
+    exit;
+}
+
 /*
 |--------------------------------------------------------------------------
 | Catch-all para otras rutas /api/*
