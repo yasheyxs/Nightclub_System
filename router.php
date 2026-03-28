@@ -1,4 +1,7 @@
 <?php
+
+declare(strict_types=1);
+
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
@@ -12,9 +15,9 @@ $uriPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 $requestedFile = __DIR__ . $uriPath;
 
 /*
-|---------------------------------------------------------
+|--------------------------------------------------------------------------
 | Archivos estáticos reales
-|---------------------------------------------------------
+|--------------------------------------------------------------------------
 */
 if (
     $uriPath !== '/' &&
@@ -25,10 +28,9 @@ if (
 }
 
 /*
-|---------------------------------------------------------
-| DASHBOARD
-|---------------------------------------------------------
-| Estas rutas ejecutan dashboard.php
+|--------------------------------------------------------------------------
+| Rutas API específicas
+|--------------------------------------------------------------------------
 */
 if ($uriPath === '/dashboard' || $uriPath === '/dashboard.php') {
     require __DIR__ . '/api/dashboard.php';
@@ -40,24 +42,34 @@ if ($uriPath === '/api/dashboard' || $uriPath === '/api/dashboard.php') {
     exit;
 }
 
+if ($uriPath === '/api/venta_entradas' || $uriPath === '/api/venta_entradas.php') {
+    require __DIR__ . '/api/venta_entradas.php';
+    exit;
+}
+
+if ($uriPath === '/api/anular_entrada' || $uriPath === '/api/anular_entrada.php') {
+    require __DIR__ . '/api/anular_entrada.php';
+    exit;
+}
+
 /*
-|---------------------------------------------------------
-| API ROUTER
-|---------------------------------------------------------
+|--------------------------------------------------------------------------
+| Catch-all para otras rutas /api/*
+|--------------------------------------------------------------------------
 */
 if (str_starts_with($uriPath, '/api/')) {
     require __DIR__ . '/api/index.php';
     exit;
 }
 
-/*
-|---------------------------------------------------------
-| PRINT ROUTER
-|---------------------------------------------------------
-*/
 $rawBody = file_get_contents('php://input');
-$decodedJson = json_decode($rawBody, true) ?? [];
+$decodedJson = json_decode($rawBody ?: '', true) ?? [];
 
+/*
+|--------------------------------------------------------------------------
+| Endpoint de impresión
+|--------------------------------------------------------------------------
+*/
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($uriPath === '/' || $uriPath === '/print')) {
     header("Content-Type: application/json; charset=utf-8");
 
@@ -69,7 +81,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($uriPath === '/' || $uriPath === '
         echo json_encode([
             'success' => false,
             'message' => 'Parámetros requeridos: printerName y filePath.'
-        ]);
+        ], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
@@ -78,7 +90,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($uriPath === '/' || $uriPath === '
         echo json_encode([
             'success' => false,
             'message' => 'El archivo no existe en la ruta especificada.'
-        ]);
+        ], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
@@ -105,7 +117,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($uriPath === '/' || $uriPath === '
         echo json_encode([
             'success' => false,
             'message' => 'No se encontró ningún script de impresión.'
-        ]);
+        ], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
@@ -116,7 +128,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($uriPath === '/' || $uriPath === '
             'success' => true,
             'message' => 'Trabajo de impresión enviado correctamente.',
             'output' => $output
-        ]);
+        ], JSON_UNESCAPED_UNICODE);
     } else {
         http_response_code(500);
         echo json_encode([
@@ -124,16 +136,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($uriPath === '/' || $uriPath === '
             'message' => 'Error al ejecutar impresión.',
             'output' => $output,
             'exitCode' => $exitCode
-        ]);
+        ], JSON_UNESCAPED_UNICODE);
     }
     exit;
 }
 
 /*
-|---------------------------------------------------------
+|--------------------------------------------------------------------------
 | 404 JSON
-|---------------------------------------------------------
+|--------------------------------------------------------------------------
 */
 header("Content-Type: application/json; charset=utf-8");
 http_response_code(404);
-echo json_encode(['error' => 'Ruta no encontrada']);
+echo json_encode([
+    'error' => 'Ruta no encontrada'
+], JSON_UNESCAPED_UNICODE);

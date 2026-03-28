@@ -82,13 +82,13 @@ export default function Entradas() {
   const [incluyeTrago, setIncluyeTrago] = useState<boolean>(false);
   const [registrandoVenta, setRegistrandoVenta] = useState<boolean>(false);
   const [tipoOperacion, setTipoOperacion] = useState<"venta" | "resta">(
-    "venta"
+    "venta",
   );
   const [closingEvent, setClosingEvent] = useState<boolean>(false);
 
   const numberFormatter = useMemo(
     () => new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 }),
-    []
+    [],
   );
 
   const currencyFormatter = useMemo(
@@ -98,16 +98,15 @@ export default function Entradas() {
         currency: "ARS",
         maximumFractionDigits: 0,
       }),
-    []
+    [],
   );
 
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const { data } = await api.get<VentaEntradasResponse>(
-          "/venta_entradas"
-        );
+        const { data } =
+          await api.get<VentaEntradasResponse>("/venta_entradas");
 
         const mappedEvents = data.eventos.map((evento) => ({
           id: evento.id,
@@ -153,7 +152,7 @@ export default function Entradas() {
             return entradaA.nombre.localeCompare(entradaB.nombre, "es", {
               sensitivity: "base",
             });
-          }
+          },
         );
 
         const ventasMap: VentasPorEvento = {};
@@ -164,7 +163,7 @@ export default function Entradas() {
             ventasMap[eventKey] = {};
           }
           ventasMap[eventKey][venta.entrada_id] = Number(
-            venta.total_vendido ?? 0
+            venta.total_vendido ?? 0,
           );
         });
 
@@ -191,15 +190,15 @@ export default function Entradas() {
   }, [toast]);
 
   const selectedEventData = events.find(
-    (event) => String(event.id) === selectedEvent
+    (event) => String(event.id) === selectedEvent,
   );
   const currentSales = selectedEvent
-    ? ventasPorEvento[selectedEvent] ?? {}
+    ? (ventasPorEvento[selectedEvent] ?? {})
     : {};
 
   const totalEntradas = Object.values(currentSales).reduce(
     (acc, value) => acc + value,
-    0
+    0,
   );
 
   const maxCapacity = selectedEventData?.capacity ?? 0;
@@ -239,10 +238,12 @@ export default function Entradas() {
         accion: "cerrar_evento",
         evento_id: Number(selectedEvent),
       })
-      .then(() => {
+      .then(({ data }) => {
         toast({
           title: "Evento cerrado",
-          description: "Se guardó el resumen y se reiniciaron los contadores.",
+          description:
+            data?.mensaje ??
+            "Se guardó el resumen y se reiniciaron los contadores.",
         });
         const closedId = Number(selectedEvent);
         setVentasPorEvento((prev) => {
@@ -352,6 +353,7 @@ export default function Entradas() {
     }
 
     const disponibles = currentSales[sellingEntradaId] ?? 0;
+
     if (tipoOperacion === "resta" && cantidadVenta > disponibles) {
       toast({
         title: "Cantidad inválida",
@@ -364,75 +366,102 @@ export default function Entradas() {
     setRegistrandoVenta(true);
 
     try {
-      const payload = {
-        accion: tipoOperacion === "resta" ? "restar" : "registrar",
-        evento_id: Number(selectedEvent),
-        entrada_id: sellingEntradaId,
-        cantidad: cantidadVenta,
-        incluye_trago: tipoOperacion === "venta" ? incluyeTrago : false,
-      };
-
-      const { data } = await api.post("/venta_entradas", payload);
-      const eventKey =
-        data?.evento_id !== undefined && data?.evento_id !== null
-          ? String(data.evento_id)
-          : String(selectedEvent);
-      const entradaKey = data?.entrada_id ?? sellingEntradaId;
-      const cantidadRegistrada =
-        typeof data?.cantidad === "number"
-          ? Number(data.cantidad)
-          : tipoOperacion === "resta"
-          ? -cantidadVenta
-          : cantidadVenta;
-
-      setVentasPorEvento((prev) => {
-        const previousEventSales = prev[eventKey] ?? {};
-        const updatedEventSales = { ...previousEventSales };
-        const nuevoTotal = Math.max(
-          (previousEventSales[entradaKey] ?? 0) + cantidadRegistrada,
-          0
-        );
-
-        if (nuevoTotal > 0) {
-          updatedEventSales[entradaKey] = nuevoTotal;
-        } else {
-          delete updatedEventSales[entradaKey];
-        }
-        return {
-          ...prev,
-          [eventKey]: updatedEventSales,
-        };
-      });
-
-      const cantidadAbsoluta = Math.abs(cantidadRegistrada);
-
-      toast({
-        title:
-          tipoOperacion === "resta" ? "Ajuste registrado" : "Venta registrada",
-        description: `${cantidadAbsoluta} ${
-          cantidadAbsoluta === 1 ? "entrada" : "entradas"
-        } de ${entrada.nombre} ${
-          tipoOperacion === "resta" ? "restadas" : "registradas"
-        } correctamente.`,
-      });
-
       if (tipoOperacion === "venta") {
-        const mensajeImpresion =
-          typeof data?.mensaje === "string"
-            ? data.mensaje
-            : "Tickets enviados a la impresora predeterminada.";
+        const payload = {
+          accion: "sumar",
+          evento_id: Number(selectedEvent),
+          entrada_id: sellingEntradaId,
+          cantidad: cantidadVenta,
+          incluye_trago: incluyeTrago,
+        };
+
+        const { data } = await api.post("/venta_entradas", payload);
+        const cantidadRegistrada = data?.tickets?.length ?? cantidadVenta;
+
+        const eventKey = String(selectedEvent);
+        const entradaKey = sellingEntradaId;
+
+        setVentasPorEvento((prev) => {
+          const previousEventSales = prev[eventKey] ?? {};
+          const updatedEventSales = { ...previousEventSales };
+          const nuevoTotal = Math.max(
+            (previousEventSales[entradaKey] ?? 0) + cantidadRegistrada,
+            0,
+          );
+
+          if (nuevoTotal > 0) {
+            updatedEventSales[entradaKey] = nuevoTotal;
+          } else {
+            delete updatedEventSales[entradaKey];
+          }
+
+          return {
+            ...prev,
+            [eventKey]: updatedEventSales,
+          };
+        });
+
+        toast({
+          title: "Venta registrada",
+          description: `${cantidadRegistrada} ${
+            cantidadRegistrada === 1 ? "entrada" : "entradas"
+          } de ${entrada.nombre} registradas correctamente.`,
+        });
 
         toast({
           title: "Impresión automática",
-          description: mensajeImpresion,
+          description: `Se imprimieron ${cantidadRegistrada} tickets`,
+        });
+      } else {
+        const payload = {
+          evento_id: Number(selectedEvent),
+          entrada_id: sellingEntradaId,
+          cantidad: cantidadVenta,
+          motivo: "Ajuste manual desde panel",
+        };
+
+        const { data } = await api.post("/anular_entrada", payload);
+        const cantidadAnulada = data?.tickets?.length ?? cantidadVenta;
+
+        const eventKey = String(selectedEvent);
+        const entradaKey = sellingEntradaId;
+
+        setVentasPorEvento((prev) => {
+          const previousEventSales = prev[eventKey] ?? {};
+          const updatedEventSales = { ...previousEventSales };
+          const nuevoTotal = Math.max(
+            (previousEventSales[entradaKey] ?? 0) - cantidadAnulada,
+            0,
+          );
+
+          if (nuevoTotal > 0) {
+            updatedEventSales[entradaKey] = nuevoTotal;
+          } else {
+            delete updatedEventSales[entradaKey];
+          }
+
+          return {
+            ...prev,
+            [eventKey]: updatedEventSales,
+          };
+        });
+
+        toast({
+          title: "Ajuste registrado",
+          description: `${cantidadAnulada} ${
+            cantidadAnulada === 1 ? "entrada anulada" : "entradas anuladas"
+          } de ${entrada.nombre} correctamente.`,
         });
       }
 
       cerrarVenta();
     } catch (error) {
-      console.error("Error al registrar venta:", error);
+      console.error("Error al registrar operación:", error);
       toast({
-        title: "No se pudo registrar la venta",
+        title:
+          tipoOperacion === "resta"
+            ? "No se pudo anular la entrada"
+            : "No se pudo registrar la venta",
         description: "Reintentá en unos segundos.",
         variant: "destructive",
       });
@@ -443,10 +472,10 @@ export default function Entradas() {
 
   const ventaAbierta = sellingEntradaId !== null;
   const entradaSeleccionada = entradas.find(
-    (item) => item.id === sellingEntradaId
+    (item) => item.id === sellingEntradaId,
   );
   const maxRestante =
-    sellingEntradaId !== null ? currentSales[sellingEntradaId] ?? 0 : 0;
+    sellingEntradaId !== null ? (currentSales[sellingEntradaId] ?? 0) : 0;
   const totalOperacion = entradaSeleccionada
     ? entradaSeleccionada.precio_base * cantidadVenta
     : 0;
@@ -526,7 +555,7 @@ export default function Entradas() {
                       width: maxCapacity
                         ? `${Math.min(
                             Math.max(capacidadPorcentaje ?? 0, 0),
-                            100
+                            100,
                           )}%`
                         : "0%",
                     }}
@@ -717,7 +746,7 @@ export default function Entradas() {
                     if (tipoOperacion === "resta") {
                       const limite = Math.max(maxRestante, 1);
                       setCantidadVenta(
-                        limite > 0 ? Math.min(baseValue, limite) : 1
+                        limite > 0 ? Math.min(baseValue, limite) : 1,
                       );
                     } else {
                       setCantidadVenta(baseValue);
@@ -749,7 +778,9 @@ export default function Entradas() {
                 Total {tipoOperacion === "resta" ? "a descontar" : "a cobrar"}:{" "}
                 <span className="ml-1">
                   {currencyFormatter.format(
-                    tipoOperacion === "resta" ? -totalOperacion : totalOperacion
+                    tipoOperacion === "resta"
+                      ? -totalOperacion
+                      : totalOperacion,
                   )}
                 </span>
               </p>

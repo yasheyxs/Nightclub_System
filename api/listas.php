@@ -25,20 +25,17 @@ try {
     $method = $_SERVER['REQUEST_METHOD'];
 
     // =====================================================
-    //  GET: Devuelve todos los usuarios con sus invitados
+    //  GET: Devuelve usuarios habilitados para listas con sus invitados
     // =====================================================
     if ($method === 'GET') {
         $sql = "
-            SELECT 
+            SELECT
                 u.id AS usuario_id,
                 u.nombre AS usuario_nombre,
                 u.telefono AS usuario_telefono,
                 u.email AS usuario_email,
                 u.rol_id AS usuario_rol_id,
-                CASE 
-                    WHEN u.rol_id = 1 THEN 'owner'
-                    ELSE 'promoter'
-                END AS usuario_rol,
+                LOWER(r.nombre) AS usuario_rol,
                 COALESCE(
                     json_agg(
                         json_build_object(
@@ -52,16 +49,18 @@ try {
                     '[]'::json
                 ) AS invitados
             FROM usuarios u
+            INNER JOIN roles r ON r.id = u.rol_id
             LEFT JOIN listas l ON l.usuario_id = u.id
-            WHERE u.activo = TRUE
-            GROUP BY u.id
+            WHERE
+                u.activo = TRUE
+                AND LOWER(r.nombre) IN ('administrador', 'promotor', 'promoter')
+            GROUP BY u.id, u.nombre, u.telefono, u.email, u.rol_id, r.nombre
             ORDER BY u.id;
         ";
 
         $stmt = $conn->query($sql);
         $result = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        // Aseguramos que "invitados" sea array real
         foreach ($result as &$row) {
             if (is_string($row['invitados'])) {
                 $decoded = json_decode($row['invitados'], true);
@@ -85,7 +84,15 @@ try {
             exit;
         }
 
-        $userStmt = $conn->prepare("SELECT activo FROM usuarios WHERE id = :id LIMIT 1");
+        $userStmt = $conn->prepare("
+            SELECT
+                u.activo,
+                LOWER(r.nombre) AS rol_nombre
+            FROM usuarios u
+            INNER JOIN roles r ON r.id = u.rol_id
+            WHERE u.id = :id
+            LIMIT 1
+        ");
         $userStmt->execute([':id' => $input['usuario_id']]);
         $usuario = $userStmt->fetch(PDO::FETCH_ASSOC);
 
@@ -97,10 +104,11 @@ try {
 
         $rawActivo = $usuario['activo'] ?? null;
         $isActive = false;
+
         if (is_bool($rawActivo)) {
             $isActive = $rawActivo;
         } elseif (is_numeric($rawActivo)) {
-            $isActive = ((int) $rawActivo) === 1;
+            $isActive = ((int)$rawActivo) === 1;
         } elseif (is_string($rawActivo)) {
             $isActive = in_array(strtolower($rawActivo), ['t', 'true', '1', 'yes', 'on'], true);
         }
@@ -108,6 +116,13 @@ try {
         if (!$isActive) {
             http_response_code(403);
             echo json_encode(["error" => "El usuario está inactivo y no puede gestionar listas."]);
+            exit;
+        }
+
+        $rolNombre = strtolower(trim((string)($usuario['rol_nombre'] ?? '')));
+        if (!in_array($rolNombre, ['administrador', 'promotor', 'promoter'], true)) {
+            http_response_code(403);
+            echo json_encode(["error" => "El rol del usuario no tiene permiso para gestionar listas."]);
             exit;
         }
 
@@ -143,7 +158,7 @@ try {
 
         $stmt = $conn->prepare("
             UPDATE listas
-            SET 
+            SET
                 nombre_persona = COALESCE(:nombre_persona, nombre_persona),
                 telefono = COALESCE(:telefono, telefono)
             WHERE id = :id

@@ -61,7 +61,6 @@ try {
         $insert = $pdo->prepare("
             INSERT INTO eventos (nombre, detalle, fecha, capacidad, activo, fecha_creacion)
             VALUES (:nombre, :detalle, :fecha, :capacidad, true, NOW())
-            ON CONFLICT (fecha) DO NOTHING
             RETURNING id, nombre, detalle, fecha, capacidad, activo
         ");
 

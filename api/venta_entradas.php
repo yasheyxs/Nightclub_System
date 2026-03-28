@@ -1,4 +1,7 @@
 <?php
+
+declare(strict_types=1);
+
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
@@ -11,149 +14,377 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 date_default_timezone_set('America/Argentina/Cordoba');
 
-// Función para generar contenido del ticket
-function generarContenidoTicket(string $tipoEntrada, float $monto, bool $incluyeTrago): string
-{
-    // Definir el ancho de la línea para centrar el título "SANTAS"
-    $ancho = 42;
-
-    // Crear el contenido del ticket en formato UTF-8
-    $contenido = "\n";
-    $contenido .= str_repeat("=", 15) . "\n";  // Línea superior de "="
-
-    // Centrar "SANTAS" en el centro de una línea de $ancho caracteres
-    $titulo = "-- SANTAS --";
-    $espacios = ($ancho - strlen($titulo)) / 2;  // Calcular los espacios antes de "SANTAS"
-    $contenido .= str_repeat(" ", floor($espacios)) . $titulo . str_repeat(" ", ceil($espacios)) . "\n";
-
-    $contenido .= str_repeat("=", 15) . "\n\n";  // Línea inferior de "="
-
-    // Cambié aquí para mostrar el nombre de la entrada en lugar del ID
-    $contenido .= "Entrada: " . $tipoEntrada . "\n";  // Ahora muestra el nombre de la entrada
-    $contenido .= "Total: $" . number_format($monto, 0, ',', '.') . "\n";  // Total al lado de "Total:", sin decimales
-
-    // Si incluye trago, añadir la línea correspondiente
-    if ($incluyeTrago) {
-        $contenido .= "INCLUYE TRAGO GRATIS\n";  // Esta línea solo se imprime si $incluyeTrago es true
-    }
-
-    $contenido .= "\n" . str_repeat("=", 15) . "\n";  // Línea para separar
-    $contenido .= " Gracias por tu compra \n";  // Mensaje de agradecimiento
-    $contenido .= str_repeat("=", 15) . "\n\n";  // Línea final de "="
-
-    // Comando de corte (específico para tu impresora)
-    $contenido .= "\n\x1D\x56\x00";  // Comando ESC/POS para corte
-
-    // Devolver el contenido en UTF-8, sin usar utf8_encode (ya es UTF-8)
-    return $contenido;
-}
-
-// Función para enviar el contenido a la impresora
-function enviarAImpresora(string $contenido): void
-{
-    // Crear un archivo temporal con el contenido en UTF-8
-    $archivoTemporal = tempnam(sys_get_temp_dir(), 'ticket_');
-    if ($archivoTemporal === false || file_put_contents($archivoTemporal, $contenido) === false) {
-        throw new RuntimeException('No se pudo generar el archivo del ticket.');
-    }
-
-    // Comando para enviar el archivo a la impresora (sin proceso intermedio)
-    $comando = 'cmd.exe /c start /min notepad /p ' . escapeshellarg($archivoTemporal);
-
-    // Ejecutar el comando para imprimir
-    $salida = [];
-    $codigo = 0;
-    exec($comando, $salida, $codigo);
-
-    // Eliminar el archivo temporal inmediatamente después de enviarlo
-    @unlink($archivoTemporal);
-
-    // Verificar si hubo algún error al enviar el comando
-    if ($codigo !== 0) {
-        $mensajeSalida = trim(implode("\n", $salida));
-        throw new RuntimeException('Error al enviar el ticket a la impresora: ' . $mensajeSalida);
-    }
-}
-
-// Función para imprimir varios tickets
-function imprimirTickets(string $tipoEntrada, float $montoUnitario, int $cantidad, bool $incluyeTrago): void
-{
-    if ($cantidad <= 0) {
-        return;
-    }
-    for ($i = 0; $i < $cantidad; $i++) {
-        // Generar el contenido del ticket
-        $contenido = generarContenidoTicket($tipoEntrada, $montoUnitario, $incluyeTrago);
-
-        // Enviar el contenido a la impresora
-        enviarAImpresora($contenido);
-    }
-}
-
+// ======================================
+// CONFIG
+// ======================================
 $host = "aws-1-us-east-2.pooler.supabase.com";
 $port = "5432";
 $dbname = "postgres";
 $user = "postgres.kxvogvgsgwfvtmidabyp";
 $password = "lapicero30!";
 
+define('PRINTER_MODE', 'raw'); // raw | notepad
+define('PRINTER_TARGET', '\\\\PC-CAJA\\IMPRESORA'); // cambiar por la compartida real
+
+// ======================================
+// HELPERS
+// ======================================
+function jsonResponse(int $status, array $data): void
+{
+    http_response_code($status);
+    echo json_encode($data, JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+function getJsonInput(): array
+{
+    $raw = file_get_contents('php://input');
+    $data = json_decode($raw ?: '', true);
+
+    if (!is_array($data)) {
+        jsonResponse(400, ['error' => 'Solicitud inválida.']);
+    }
+
+    return $data;
+}
+
+function normalizeBool(mixed $value): bool
+{
+    if ($value === '' || $value === null) {
+        return false;
+    }
+
+    if (is_bool($value)) {
+        return $value;
+    }
+
+    if (is_string($value)) {
+        return in_array(strtolower(trim($value)), ['true', '1', 'on', 'yes', 'si'], true);
+    }
+
+    if (is_numeric($value)) {
+        return ((int)$value) === 1;
+    }
+
+    return (bool)$value;
+}
+
+function generarQrCodigo(): string
+{
+    return 'SANTAS-' . date('YmdHis') . '-' . strtoupper(bin2hex(random_bytes(4)));
+}
+
+function generarQrHash(string $qrCodigo): string
+{
+    return hash('sha256', $qrCodigo);
+}
+
+// ======================================
+// IMPRESIÓN
+// ======================================
+function escposCenter(string $text): string
+{
+    return "\x1B\x61\x01" . $text . "\n" . "\x1B\x61\x00";
+}
+
+function escposQr(string $data): string
+{
+    $storeLen = strlen($data) + 3;
+    $pL = chr($storeLen % 256);
+    $pH = chr(intdiv($storeLen, 256));
+
+    $cmd = '';
+    $cmd .= "\x1D\x28\x6B\x04\x00\x31\x41\x32\x00";
+    $cmd .= "\x1D\x28\x6B\x03\x00\x31\x43\x06";
+    $cmd .= "\x1D\x28\x6B\x03\x00\x31\x45\x30";
+    $cmd .= "\x1D\x28\x6B{$pL}{$pH}\x31\x50\x30" . $data;
+    $cmd .= "\x1D\x28\x6B\x03\x00\x31\x51\x30";
+
+    return $cmd;
+}
+
+function generarContenidoTicket(string $tipoEntrada, float $montoUnitario, bool $incluyeTrago, string $qrCodigo): string
+{
+    $out = '';
+    $out .= "\x1B\x40";
+    $out .= escposCenter('SANTAS');
+    $out .= escposCenter('--------------------------');
+    $out .= "Entrada: " . $tipoEntrada . "\n";
+    $out .= "Total: $" . number_format($montoUnitario, 0, ',', '.') . "\n";
+
+    if ($incluyeTrago) {
+        $out .= "INCLUYE TRAGO GRATIS\n";
+    }
+
+    $out .= "\n";
+    $out .= escposCenter('PRESENTAR QR EN INGRESO');
+    $out .= "\n";
+    $out .= "\x1B\x61\x01";
+    $out .= escposQr($qrCodigo);
+    $out .= "\x1B\x61\x00";
+    $out .= "\n";
+    $out .= escposCenter('Gracias por tu compra');
+    $out .= "\n\n\n";
+    $out .= "\x1D\x56\x00";
+
+    return $out;
+}
+
+function enviarAImpresora(string $contenido): void
+{
+    $archivoTemporal = tempnam(sys_get_temp_dir(), 'ticket_');
+    if ($archivoTemporal === false) {
+        throw new RuntimeException('No se pudo crear el archivo temporal.');
+    }
+
+    if (file_put_contents($archivoTemporal, $contenido) === false) {
+        @unlink($archivoTemporal);
+        throw new RuntimeException('No se pudo escribir el ticket temporal.');
+    }
+
+    if (PRINTER_MODE === 'raw') {
+        $comando = 'cmd.exe /c copy /b ' . escapeshellarg($archivoTemporal) . ' ' . escapeshellarg(PRINTER_TARGET);
+    } else {
+        $comando = 'cmd.exe /c start /min notepad /p ' . escapeshellarg($archivoTemporal);
+    }
+
+    $salida = [];
+    $codigo = 0;
+    exec($comando, $salida, $codigo);
+
+    @unlink($archivoTemporal);
+
+    if ($codigo !== 0) {
+        $mensajeSalida = trim(implode("\n", $salida));
+        throw new RuntimeException('Error al enviar el ticket a la impresora: ' . $mensajeSalida);
+    }
+}
+
+// ======================================
+// MAIN
+// ======================================
 try {
-    // Conexión a la base de datos
-    $pdo = new PDO("pgsql:host=$host;port=$port;dbname=$dbname;user=$user;password=$password;sslmode=require");
+    $pdo = new PDO(
+        "pgsql:host=$host;port=$port;dbname=$dbname;user=$user;password=$password;sslmode=require"
+    );
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 
     $method = $_SERVER['REQUEST_METHOD'];
 
     if ($method === 'GET') {
-        $eventosStmt = $pdo->query("SELECT id, nombre, fecha, capacidad FROM eventos WHERE activo = true ORDER BY fecha ASC");
-        $entradasStmt = $pdo->query("SELECT id, nombre, descripcion, precio_base FROM entradas WHERE activo = true ORDER BY nombre ASC");
-        $ventasStmt = $pdo->query("SELECT evento_id, entrada_id, COALESCE(SUM(cantidad), 0) AS total_vendido FROM ventas_entradas GROUP BY evento_id, entrada_id");
+        $eventosStmt = $pdo->query("
+            SELECT id, nombre, fecha, capacidad
+            FROM eventos
+            WHERE activo = true
+            ORDER BY fecha ASC
+        ");
 
-        echo json_encode([
+        $entradasStmt = $pdo->query("
+            SELECT id, nombre, descripcion, precio_base
+            FROM entradas
+            WHERE activo = true
+            ORDER BY nombre ASC
+        ");
+
+        $ventasStmt = $pdo->query("
+            SELECT
+                evento_id,
+                entrada_id,
+                COALESCE(COUNT(*), 0) AS total_vendido
+            FROM ventas_entradas
+            WHERE estado <> 'anulada'
+            GROUP BY evento_id, entrada_id
+        ");
+
+        jsonResponse(200, [
             'eventos' => $eventosStmt->fetchAll(),
             'entradas' => $entradasStmt->fetchAll(),
             'ventas' => $ventasStmt->fetchAll()
-        ], JSON_UNESCAPED_UNICODE);
-        exit;
+        ]);
     }
 
     if ($method === 'POST') {
-        $input = json_decode(file_get_contents('php://input'), true);
+        $input = getJsonInput();
 
-        if (!$input || !isset($input['accion'])) {
-            http_response_code(400);
-            echo json_encode(['error' => 'El campo accion es obligatorio.']);
-            exit;
+        if (!isset($input['accion'])) {
+            jsonResponse(400, ['error' => 'El campo accion es obligatorio.']);
         }
 
-        $accion = $input['accion'];
+        $accion = trim((string)$input['accion']);
 
-        // Registro o resta de venta
+        // ======================================
+        // CERRAR EVENTO
+        // ======================================
+        if ($accion === 'cerrar_evento') {
+            if (!isset($input['evento_id'])) {
+                jsonResponse(400, ['error' => 'El campo evento_id es obligatorio.']);
+            }
+
+            $eventoId = (int)$input['evento_id'];
+
+            if ($eventoId <= 0) {
+                jsonResponse(400, ['error' => 'evento_id inválido.']);
+            }
+
+            $eventoStmt = $pdo->prepare("
+                SELECT id, nombre, capacidad, activo
+                FROM eventos
+                WHERE id = :id
+                LIMIT 1
+            ");
+            $eventoStmt->execute([':id' => $eventoId]);
+            $evento = $eventoStmt->fetch();
+
+            if (!$evento) {
+                jsonResponse(404, ['error' => 'Evento no encontrado.']);
+            }
+
+            $estaActivo = isset($evento['activo'])
+                ? filter_var($evento['activo'], FILTER_VALIDATE_BOOLEAN)
+                : false;
+
+            if (!$estaActivo) {
+                jsonResponse(400, ['error' => 'El evento ya está cerrado.']);
+            }
+
+            $detalleStmt = $pdo->prepare("
+                SELECT
+                    e.id AS entrada_id,
+                    e.nombre AS entrada_nombre,
+                    e.precio_base,
+                    COUNT(v.id) FILTER (WHERE v.estado <> 'anulada') AS cantidad,
+                    COALESCE(SUM(v.total) FILTER (WHERE v.estado <> 'anulada'), 0) AS total
+                FROM entradas e
+                LEFT JOIN ventas_entradas v
+                    ON v.entrada_id = e.id
+                   AND v.evento_id = :evento_id
+                WHERE e.activo = true
+                GROUP BY e.id, e.nombre, e.precio_base
+                HAVING COUNT(v.id) FILTER (WHERE v.estado <> 'anulada') > 0
+                ORDER BY e.nombre ASC
+            ");
+            $detalleStmt->execute([':evento_id' => $eventoId]);
+            $detalle = $detalleStmt->fetchAll();
+
+            $totalVendido = 0;
+            $totalMonto = 0.0;
+
+            foreach ($detalle as $row) {
+                $totalVendido += (int)$row['cantidad'];
+                $totalMonto += (float)$row['total'];
+            }
+
+            $capacidad = (int)$evento['capacidad'];
+            $porcentaje = $capacidad > 0
+                ? round(($totalVendido / $capacidad) * 100, 2)
+                : 0;
+
+            $detalleJson = json_encode(array_map(function ($row) {
+                return [
+                    'entrada_id' => (int)$row['entrada_id'],
+                    'entrada_nombre' => $row['entrada_nombre'],
+                    'precio_base' => (float)$row['precio_base'],
+                    'cantidad' => (int)$row['cantidad'],
+                    'total' => (float)$row['total']
+                ];
+            }, $detalle), JSON_UNESCAPED_UNICODE);
+
+            $pdo->beginTransaction();
+
+            $insertCierre = $pdo->prepare("
+                INSERT INTO cierres_eventos (
+                    evento_id,
+                    evento_nombre,
+                    total_vendido,
+                    total_monto,
+                    capacidad,
+                    porcentaje,
+                    detalle,
+                    fecha_cierre
+                )
+                VALUES (
+                    :evento_id,
+                    :evento_nombre,
+                    :total_vendido,
+                    :total_monto,
+                    :capacidad,
+                    :porcentaje,
+                    CAST(:detalle AS jsonb),
+                    NOW()
+                )
+                RETURNING id, fecha_cierre
+            ");
+
+            $insertCierre->execute([
+                ':evento_id' => $eventoId,
+                ':evento_nombre' => $evento['nombre'],
+                ':total_vendido' => $totalVendido,
+                ':total_monto' => $totalMonto,
+                ':capacidad' => $capacidad,
+                ':porcentaje' => $porcentaje,
+                ':detalle' => $detalleJson ?: '[]'
+            ]);
+
+            $cierre = $insertCierre->fetch();
+
+            $cerrarEventoStmt = $pdo->prepare("
+                UPDATE eventos
+                SET activo = false
+                WHERE id = :id
+            ");
+            $cerrarEventoStmt->execute([':id' => $eventoId]);
+
+            $pdo->commit();
+
+            jsonResponse(200, [
+                'ok' => true,
+                'mensaje' => 'Evento cerrado correctamente.',
+                'cierre' => [
+                    'id' => (int)$cierre['id'],
+                    'evento_id' => $eventoId,
+                    'evento_nombre' => $evento['nombre'],
+                    'fecha_cierre' => $cierre['fecha_cierre'],
+                    'total_vendido' => $totalVendido,
+                    'total_monto' => $totalMonto,
+                    'capacidad' => $capacidad,
+                    'porcentaje' => $porcentaje,
+                    'detalle' => json_decode($detalleJson ?: '[]', true)
+                ]
+            ]);
+        }
+
+        // ======================================
+        // SUMAR / VENDER
+        // ======================================
+        if ($accion !== 'sumar') {
+            jsonResponse(400, ['error' => 'Acción no válida.']);
+        }
+
         if (!isset($input['entrada_id']) || !isset($input['cantidad'])) {
-            http_response_code(400);
-            echo json_encode(['error' => 'Los campos entrada_id y cantidad son obligatorios.']);
-            exit;
+            jsonResponse(400, ['error' => 'Los campos entrada_id y cantidad son obligatorios.']);
         }
 
         $entradaId = (int)$input['entrada_id'];
         $cantidad = (int)$input['cantidad'];
         $eventoId = isset($input['evento_id']) ? (int)$input['evento_id'] : null;
-        $valor = $input['incluye_trago'] ?? false;
+        $usuarioId = isset($input['usuario_id']) ? (int)$input['usuario_id'] : null;
+        $promotorId = isset($input['promotor_id']) ? (int)$input['promotor_id'] : null;
+        $nombre = isset($input['nombre']) ? trim((string)$input['nombre']) : null;
+        $dni = isset($input['dni']) ? trim((string)$input['dni']) : null;
+        $incluyeTrago = normalizeBool($input['incluye_trago'] ?? false);
 
-        // Normalizar valor booleano
-        if ($valor === '' || $valor === null) {
-            $incluyeTrago = false;
-        } elseif (is_string($valor)) {
-            $incluyeTrago = in_array(strtolower(trim($valor)), ['true', '1', 'on', 'yes'], true);
-        } elseif (is_numeric($valor)) {
-            $incluyeTrago = ((int)$valor) === 1;
-        } else {
-            $incluyeTrago = (bool)$valor;
+        if ($cantidad <= 0) {
+            jsonResponse(400, ['error' => 'La cantidad debe ser mayor a 0.']);
         }
 
-        // Verificar si el evento está activo
         if ($eventoId !== null) {
-            $eventoActivoStmt = $pdo->prepare("SELECT activo FROM eventos WHERE id = :id");
+            $eventoActivoStmt = $pdo->prepare("
+                SELECT id, activo
+                FROM eventos
+                WHERE id = :id
+                LIMIT 1
+            ");
             $eventoActivoStmt->execute([':id' => $eventoId]);
             $eventoActivo = $eventoActivoStmt->fetch();
 
@@ -162,66 +393,159 @@ try {
                 : false;
 
             if (!$estaActivo) {
-                http_response_code(400);
-                echo json_encode(['error' => 'El evento está cerrado o no existe.']);
-                exit;
+                jsonResponse(400, ['error' => 'El evento está cerrado o no existe.']);
             }
         }
 
-        // Obtener el nombre de la entrada en lugar del ID
-        $entradaStmt = $pdo->prepare("SELECT nombre, precio_base FROM entradas WHERE id = :id AND activo = true");
+        $entradaStmt = $pdo->prepare("
+            SELECT id, nombre, precio_base
+            FROM entradas
+            WHERE id = :id AND activo = true
+            LIMIT 1
+        ");
         $entradaStmt->execute([':id' => $entradaId]);
         $entrada = $entradaStmt->fetch();
 
         if (!$entrada) {
-            http_response_code(404);
-            echo json_encode(['error' => 'Entrada no encontrada o inactiva.']);
-            exit;
+            jsonResponse(404, ['error' => 'Entrada no encontrada o inactiva.']);
         }
 
-        $nombreEntrada = $entrada['nombre'];
+        $nombreEntrada = (string)$entrada['nombre'];
         $precioUnitario = (float)$entrada['precio_base'];
 
-        // Insertar venta
         $insert = $pdo->prepare("
-            INSERT INTO ventas_entradas (entrada_id, evento_id, cantidad, precio_unitario, incluye_trago)
-            VALUES (:entrada_id, :evento_id, :cantidad, :precio_unitario, CAST(:incluye_trago AS boolean))
-            RETURNING id, entrada_id, evento_id, cantidad, precio_unitario, incluye_trago, fecha_venta
+            INSERT INTO ventas_entradas (
+                entrada_id,
+                cantidad,
+                precio_unitario,
+                total,
+                fecha_venta,
+                evento_id,
+                incluye_trago,
+                usuario_id,
+                estado,
+                nombre,
+                dni,
+                promotor_id,
+                qr_codigo,
+                qr_hash,
+                qr_generado_at
+            )
+            VALUES (
+                :entrada_id,
+                1,
+                :precio_unitario,
+                :total,
+                NOW(),
+                :evento_id,
+                :incluye_trago,
+                :usuario_id,
+                'comprada',
+                :nombre,
+                :dni,
+                :promotor_id,
+                :qr_codigo,
+                :qr_hash,
+                NOW()
+            )
+            RETURNING
+                id,
+                entrada_id,
+                evento_id,
+                cantidad,
+                precio_unitario,
+                total,
+                incluye_trago,
+                fecha_venta,
+                estado,
+                nombre,
+                dni,
+                promotor_id,
+                usuario_id,
+                qr_codigo,
+                qr_hash,
+                qr_generado_at
         ");
 
-        $insert->bindValue(':entrada_id', $entradaId, PDO::PARAM_INT);
-        $insert->bindValue(':evento_id', $eventoId, PDO::PARAM_INT);
-        $insert->bindValue(':cantidad', $cantidad, PDO::PARAM_INT);
-        $insert->bindValue(':precio_unitario', $precioUnitario);
-        $insert->bindValue(':incluye_trago', $incluyeTrago ? 'true' : 'false', PDO::PARAM_STR);
-        $insert->execute();
+        $tickets = [];
+        $pdo->beginTransaction();
 
-        $venta = $insert->fetch();
-        $venta['total'] = (float)$venta['precio_unitario'] * (int)$venta['cantidad'];
+        for ($i = 0; $i < $cantidad; $i++) {
+            $qrCodigo = generarQrCodigo();
+            $qrHash = generarQrHash($qrCodigo);
 
-        // Imprimir el ticket de la venta con el nombre de la entrada
-        imprimirTickets($nombreEntrada, $venta['total'], $cantidad, $incluyeTrago);
+            $insert->execute([
+                ':entrada_id' => $entradaId,
+                ':precio_unitario' => $precioUnitario,
+                ':total' => $precioUnitario,
+                ':evento_id' => $eventoId,
+                ':incluye_trago' => $incluyeTrago,
+                ':usuario_id' => $usuarioId,
+                ':nombre' => $nombre,
+                ':dni' => $dni,
+                ':promotor_id' => $promotorId,
+                ':qr_codigo' => $qrCodigo,
+                ':qr_hash' => $qrHash
+            ]);
 
-        echo json_encode([
-            'id' => (int)$venta['id'],
-            'entrada_id' => (int)$venta['entrada_id'],
-            'evento_id' => $venta['evento_id'] !== null ? (int)$venta['evento_id'] : null,
-            'cantidad' => (int)$venta['cantidad'],
-            'precio_unitario' => (float)$venta['precio_unitario'],
-            'incluye_trago' => (bool)$venta['incluye_trago'],
-            'fecha_venta' => $venta['fecha_venta'],
-            'total' => (float)$venta['total']
-        ], JSON_UNESCAPED_UNICODE);
-        exit;
+            $venta = $insert->fetch();
+            $tickets[] = [
+                'id' => (int)$venta['id'],
+                'entrada_id' => (int)$venta['entrada_id'],
+                'evento_id' => $venta['evento_id'] !== null ? (int)$venta['evento_id'] : null,
+                'cantidad' => (int)$venta['cantidad'],
+                'precio_unitario' => (float)$venta['precio_unitario'],
+                'total' => (float)$venta['total'],
+                'incluye_trago' => filter_var($venta['incluye_trago'], FILTER_VALIDATE_BOOLEAN),
+                'fecha_venta' => $venta['fecha_venta'],
+                'estado' => $venta['estado'],
+                'nombre' => $venta['nombre'],
+                'dni' => $venta['dni'],
+                'promotor_id' => $venta['promotor_id'] !== null ? (int)$venta['promotor_id'] : null,
+                'usuario_id' => $venta['usuario_id'] !== null ? (int)$venta['usuario_id'] : null,
+                'qr_codigo' => $venta['qr_codigo'],
+                'qr_hash' => $venta['qr_hash'],
+                'qr_generado_at' => $venta['qr_generado_at']
+            ];
+        }
+
+        $pdo->commit();
+
+        foreach ($tickets as $ticket) {
+            $contenido = generarContenidoTicket(
+                $nombreEntrada,
+                (float)$ticket['precio_unitario'],
+                (bool)$ticket['incluye_trago'],
+                (string)$ticket['qr_codigo']
+            );
+            enviarAImpresora($contenido);
+        }
+
+        jsonResponse(200, [
+            'ok' => true,
+            'resumen' => [
+                'entrada_id' => $entradaId,
+                'evento_id' => $eventoId,
+                'cantidad' => count($tickets),
+                'precio_unitario' => $precioUnitario,
+                'total' => $precioUnitario * count($tickets),
+                'incluye_trago' => $incluyeTrago
+            ],
+            'tickets' => $tickets
+        ]);
     }
 
-    // Si el método no es GET ni POST
-    http_response_code(405);
-    echo json_encode(['error' => 'Método no permitido.']);
+    jsonResponse(405, ['error' => 'Método no permitido.']);
 } catch (PDOException $e) {
-    http_response_code(500);
-    echo json_encode(['error' => $e->getMessage()]);
+    if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+
+    jsonResponse(500, ['error' => $e->getMessage()]);
 } catch (Throwable $e) {
-    http_response_code(500);
-    echo json_encode(['error' => 'Error inesperado: ' . $e->getMessage()]);
+    if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+
+    jsonResponse(500, ['error' => 'Error inesperado: ' . $e->getMessage()]);
 }

@@ -84,19 +84,26 @@ export default function Listas() {
       try {
         const { data } = await api.get<UserResponse[]>("/listas");
         if (Array.isArray(data)) {
-          const formatted: ListUser[] = data.map((u) => ({
-            id: String(u.usuario_id),
-            name: u.usuario_nombre,
-            role: u.usuario_rol === "owner" ? "owner" : "promoter",
-            code: u.usuario_codigo ?? "",
-            guestList: Array.isArray(u.invitados)
-              ? u.invitados.map((g) => ({
-                  id: String(g.id),
-                  fullName: g.nombre_persona ?? "Sin nombre asignado",
-                  document: g.telefono ?? "",
-                }))
-              : [],
-          }));
+          const formatted: ListUser[] = data.map((u) => {
+            const rol = (u.usuario_rol ?? "").toLowerCase().trim();
+
+            return {
+              id: String(u.usuario_id),
+              name: u.usuario_nombre,
+              role:
+                rol === "administrador" || rol === "owner"
+                  ? "owner"
+                  : "promoter",
+              code: u.usuario_codigo ?? "",
+              guestList: Array.isArray(u.invitados)
+                ? u.invitados.map((g) => ({
+                    id: String(g.id),
+                    fullName: g.nombre_persona ?? "Sin nombre asignado",
+                    document: g.telefono ?? "",
+                  }))
+                : [],
+            };
+          });
 
           setUsers(formatted);
           setSelectedUserId(formatted[0]?.id ?? null);
@@ -137,7 +144,7 @@ export default function Listas() {
 
   const selectedUser = useMemo(
     () => users.find((u) => u.id === selectedUserId) ?? null,
-    [users, selectedUserId]
+    [users, selectedUserId],
   );
 
   const totalGuests = users.reduce((acc, u) => acc + u.guestList.length, 0);
@@ -173,11 +180,11 @@ export default function Listas() {
                           fullName: data.nombre_persona,
                           document: data.telefono ?? "",
                         }
-                      : g
+                      : g,
                   ),
                 }
-              : u
-          )
+              : u,
+          ),
         );
         toast({ title: "Actualizado", description: "Invitado editado." });
       } else {
@@ -195,8 +202,8 @@ export default function Listas() {
           prev.map((u) =>
             u.id === selectedUser.id
               ? { ...u, guestList: [...u.guestList, newGuest] }
-              : u
-          )
+              : u,
+          ),
         );
         toast({ title: "Agregado", description: "Invitado agregado." });
       }
@@ -223,8 +230,8 @@ export default function Listas() {
                 ...u,
                 guestList: u.guestList.filter((g) => g.id !== guestId),
               }
-            : u
-        )
+            : u,
+        ),
       );
       toast({ title: "Eliminado", description: "Invitado eliminado." });
     } catch {
@@ -243,7 +250,7 @@ export default function Listas() {
     return selectedUser.guestList.filter(
       (g) =>
         g.fullName.toLowerCase().includes(q) ||
-        g.document.toLowerCase().includes(q)
+        g.document.toLowerCase().includes(q),
     );
   }, [selectedUser, guestSearch]);
 
