@@ -52,6 +52,11 @@ if ($uriPath === '/api/anular_entrada' || $uriPath === '/api/anular_entrada.php'
     exit;
 }
 
+if ($uriPath === '/api/validar_qr' || $uriPath === '/api/validar_qr.php') {
+    require __DIR__ . '/api/validar_qr.php';
+    exit;
+}
+
 /*
 |--------------------------------------------------------------------------
 | Catch-all para otras rutas /api/*
