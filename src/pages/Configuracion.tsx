@@ -62,9 +62,16 @@ export default function Configuracion() {
   const fetchEntradas = async () => {
     setLoading(true);
     try {
-      const { data } = await api.get("/entradas");
-      if (Array.isArray(data)) setEntradas(data);
-      else throw new Error("Respuesta inválida del servidor");
+      const response = await api.get("/entradas");
+      const payload = response.data;
+
+      if (Array.isArray(payload)) {
+        setEntradas(payload);
+      } else if (payload?.ok && Array.isArray(payload.data)) {
+        setEntradas(payload.data);
+      } else {
+        throw new Error("Respuesta inválida del servidor");
+      }
     } catch (error) {
       console.error(error);
       toast({
@@ -103,7 +110,7 @@ export default function Configuracion() {
             }
           }
           return e;
-        })
+        }),
       );
     }, 60000);
     return () => clearInterval(interval);

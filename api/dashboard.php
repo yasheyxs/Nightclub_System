@@ -1,7 +1,12 @@
 <?php
+file_put_contents(__DIR__ . '/dashboard-hit.txt', date('c') . PHP_EOL, FILE_APPEND);
+
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: GET, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
+
+ini_set('display_errors', 0);
+error_reporting(0);
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);
@@ -242,9 +247,11 @@ try {
                 END
             ) AS ocupacion_evento
         FROM eventos e
-        LEFT JOIN ventas_entradas ve ON e.id = ve.evento_id
+        LEFT JOIN ventas_entradas ve
+            ON e.id = ve.evento_id
+            AND ve.estado IN ('comprada', 'usada')
         LEFT JOIN cierres_eventos ce ON ce.evento_id = e.id
-        WHERE e.fecha >= :mstart::date AND e.fecha < :mend::date  -- Considera todos los eventos del mes
+        WHERE e.fecha >= :mstart::date AND e.fecha < :mend::date
         GROUP BY e.id, e.fecha, e.capacidad, ce.total_vendido, ce.total_monto, ce.porcentaje
     ),
     daily_stats AS (
@@ -260,7 +267,7 @@ try {
         COALESCE(SUM(total), 0) AS recaudacion_mes,
         (SELECT ROUND(AVG(ocupacion)) FROM daily_stats) AS ocupacion_promedio
     FROM event_stats
-";
+    ";
 
 
     $st = $pdo->prepare($metricsSql);
@@ -277,12 +284,14 @@ try {
     // === 2. Noche en curso ===
     $currentSql = "
         SELECT e.id, e.nombre AS event_name,
-               TO_CHAR(e.fecha, 'DD Mon YYYY') AS fecha_txt,
-               COALESCE(SUM(ve.cantidad),0) AS entradas_vendidas,
-               COALESCE(SUM(ve.total),0) AS recaudacion,
-               ROUND((COALESCE(SUM(ve.cantidad),0)*100.0)/NULLIF(e.capacidad,0)) AS ocupacion
+            TO_CHAR(e.fecha, 'DD Mon YYYY') AS fecha_txt,
+            COALESCE(SUM(ve.cantidad),0) AS entradas_vendidas,
+            COALESCE(SUM(ve.total),0) AS recaudacion,
+            ROUND((COALESCE(SUM(ve.cantidad),0)*100.0)/NULLIF(e.capacidad,0)) AS ocupacion
         FROM eventos e
-        LEFT JOIN ventas_entradas ve ON ve.evento_id = e.id
+        LEFT JOIN ventas_entradas ve
+        ON ve.evento_id = e.id
+        AND ve.estado IN ('comprada', 'usada')
         WHERE DATE(e.fecha) = CURRENT_DATE
         GROUP BY e.id, e.nombre, e.fecha, e.capacidad
         ORDER BY e.fecha DESC
@@ -306,17 +315,19 @@ try {
     $upcomingSql = "
     SELECT 
         e.id,
-        e.nombre AS name,  -- 👈 cambiado a name para mantener consistencia
+        e.nombre AS name,
         TO_CHAR(e.fecha, 'YYYY-MM-DD HH24:MI:SS') AS date_text,
         COALESCE(SUM(ve.total),0) AS recaudacion,
         ROUND((COALESCE(SUM(ve.cantidad),0)*100.0)/NULLIF(e.capacidad,0)) AS ocupacion
     FROM eventos e
-    LEFT JOIN ventas_entradas ve ON ve.evento_id = e.id
+    LEFT JOIN ventas_entradas ve
+        ON ve.evento_id = e.id
+        AND ve.estado IN ('comprada', 'usada')
     WHERE e.fecha > NOW() AND e.activo = TRUE
     GROUP BY e.id, e.nombre, e.fecha, e.capacidad
     ORDER BY e.fecha ASC
     LIMIT :limitUp
-";
+    ";
     $up = $pdo->prepare($upcomingSql);
     $up->bindValue(':limitUp', $limitUp, PDO::PARAM_INT);
     $up->execute();
@@ -349,16 +360,18 @@ try {
 
     $pastSql = "
         SELECT e.id,
-               e.nombre AS name,
-               TO_CHAR(e.fecha, 'YYYY-MM-DD HH24:MI:SS') AS date_text,
-               COALESCE(ce.total_vendido, COALESCE(SUM(ve.cantidad),0)) AS entradas_vendidas,
-               COALESCE(ce.total_monto, COALESCE(SUM(ve.total),0)) AS recaudacion,
-               COALESCE(
+            e.nombre AS name,
+            TO_CHAR(e.fecha, 'YYYY-MM-DD HH24:MI:SS') AS date_text,
+            COALESCE(ce.total_vendido, COALESCE(SUM(ve.cantidad),0)) AS entradas_vendidas,
+            COALESCE(ce.total_monto, COALESCE(SUM(ve.total),0)) AS recaudacion,
+            COALESCE(
                     ce.porcentaje,
                     ROUND((COALESCE(SUM(ve.cantidad),0)*100.0)/NULLIF(e.capacidad,0))
-               ) AS ocupacion
+            ) AS ocupacion
         FROM eventos e
-        LEFT JOIN ventas_entradas ve ON ve.evento_id = e.id
+        LEFT JOIN ventas_entradas ve
+        ON ve.evento_id = e.id
+        AND ve.estado IN ('comprada', 'usada')
         LEFT JOIN cierres_eventos ce ON ce.evento_id = e.id
         WHERE $where
         GROUP BY e.id, e.nombre, e.fecha, e.capacidad, ce.total_vendido, ce.total_monto, ce.porcentaje
@@ -380,18 +393,20 @@ try {
 
     $calendarStmt = $pdo->prepare("
         SELECT e.id,
-               e.nombre AS name,
-               TO_CHAR(e.fecha, 'YYYY-MM-DD HH24:MI:SS') AS date_text,
-               COALESCE(ce.total_vendido, COALESCE(SUM(ve.cantidad),0)) AS entradas_vendidas,
-               COALESCE(ce.total_monto, COALESCE(SUM(ve.total),0)) AS recaudacion,
-               COALESCE(
+            e.nombre AS name,
+            TO_CHAR(e.fecha, 'YYYY-MM-DD HH24:MI:SS') AS date_text,
+            COALESCE(ce.total_vendido, COALESCE(SUM(ve.cantidad),0)) AS entradas_vendidas,
+            COALESCE(ce.total_monto, COALESCE(SUM(ve.total),0)) AS recaudacion,
+            COALESCE(
                     ce.porcentaje,
                     ROUND((COALESCE(SUM(ve.cantidad),0)*100.0)/NULLIF(e.capacidad,0))
-               ) AS ocupacion,
-               e.activo AS activo,
-               CASE WHEN ce.evento_id IS NOT NULL THEN TRUE ELSE FALSE END AS cerrado
+            ) AS ocupacion,
+            e.activo AS activo,
+            CASE WHEN ce.evento_id IS NOT NULL THEN TRUE ELSE FALSE END AS cerrado
         FROM eventos e
-        LEFT JOIN ventas_entradas ve ON ve.evento_id = e.id
+        LEFT JOIN ventas_entradas ve
+        ON ve.evento_id = e.id
+        AND ve.estado IN ('comprada', 'usada')
         LEFT JOIN cierres_eventos ce ON ce.evento_id = e.id
         WHERE DATE(e.fecha) >= :mstart::date AND DATE(e.fecha) < :mend::date
         GROUP BY e.id, e.nombre, e.fecha, e.capacidad, ce.total_vendido, ce.total_monto, ce.porcentaje, e.activo, ce.evento_id
@@ -426,7 +441,9 @@ try {
                     END
                 ) AS ocupacion_evento
             FROM eventos e
-            LEFT JOIN ventas_entradas ve ON e.id = ve.evento_id
+            LEFT JOIN ventas_entradas ve
+            ON e.id = ve.evento_id
+            AND ve.estado IN ('comprada', 'usada')
             LEFT JOIN cierres_eventos ce ON ce.evento_id = e.id
             WHERE e.fecha >= :mstart::date AND e.fecha < :mend::date
             GROUP BY e.id, e.fecha, e.capacidad, ce.total_vendido, ce.total_monto, ce.porcentaje
@@ -439,10 +456,10 @@ try {
             GROUP BY DATE(fecha)
         )
         SELECT TO_CHAR(:mstart::date, 'TMMonth YYYY') AS month_label,
-               COUNT(*) AS total_eventos,
-               COALESCE(SUM(entradas),0) AS total_entradas,
-               COALESCE(SUM(total),0) AS recaudacion,
-               (SELECT ROUND(AVG(ocupacion)) FROM daily_stats) AS ocupacion_promedio
+            COUNT(*) AS total_eventos,
+            COALESCE(SUM(entradas),0) AS total_entradas,
+            COALESCE(SUM(total),0) AS recaudacion,
+            (SELECT ROUND(AVG(ocupacion)) FROM daily_stats) AS ocupacion_promedio
         FROM event_stats
     ";
     $ms = $pdo->prepare($monthlySql);
@@ -461,7 +478,9 @@ try {
     $salesStmt = $pdo->query("
         SELECT TO_CHAR(DATE(e.fecha),'Dy') AS name, COALESCE(SUM(ve.total),0) AS ventas
         FROM eventos e
-        LEFT JOIN ventas_entradas ve ON e.id = ve.evento_id
+        LEFT JOIN ventas_entradas ve
+            ON e.id = ve.evento_id
+            AND ve.estado IN ('comprada', 'usada')
         WHERE e.fecha >= NOW() - INTERVAL '7 day'
         GROUP BY 1 ORDER BY MIN(e.fecha)
     ");
@@ -471,7 +490,9 @@ try {
     $attendanceStmt = $pdo->query("
         SELECT TO_CHAR(DATE(e.fecha),'Dy') AS name, COALESCE(SUM(ve.cantidad),0) AS asistencia
         FROM eventos e
-        LEFT JOIN ventas_entradas ve ON e.id = ve.evento_id
+        LEFT JOIN ventas_entradas ve
+            ON e.id = ve.evento_id
+            AND ve.estado IN ('comprada', 'usada')
         WHERE e.fecha >= NOW() - INTERVAL '7 day'
         GROUP BY 1 ORDER BY MIN(e.fecha)
     ");
@@ -496,9 +517,18 @@ try {
     // === 9. Distribución por evento ===
     $categoryStmt = $pdo->query("
         SELECT e.nombre AS name,
-               ROUND((COALESCE(SUM(ve.total),0)/NULLIF((SELECT SUM(total) FROM ventas_entradas),0))*100,2) AS value
+            ROUND((
+                COALESCE(SUM(ve.total),0) /
+                NULLIF((
+                    SELECT SUM(total)
+                    FROM ventas_entradas
+                    WHERE estado IN ('comprada', 'usada')
+                ),0)
+            ) * 100, 2) AS value
         FROM eventos e
-        LEFT JOIN ventas_entradas ve ON e.id = ve.evento_id
+        LEFT JOIN ventas_entradas ve
+        ON e.id = ve.evento_id
+        AND ve.estado IN ('comprada', 'usada')
         GROUP BY e.nombre
         ORDER BY value DESC
         LIMIT 5
@@ -549,8 +579,12 @@ try {
     // === Salida final ===
     header("Content-Type: application/json; charset=utf-8");
     echo json_encode($response, JSON_UNESCAPED_UNICODE);
-} catch (PDOException $e) {
+} catch (Throwable $e) {
     http_response_code(500);
     header("Content-Type: application/json; charset=utf-8");
-    echo json_encode(['error' => $e->getMessage()]);
+
+    echo json_encode([
+        'error' => true,
+        'message' => 'Error interno del servidor'
+    ]);
 }

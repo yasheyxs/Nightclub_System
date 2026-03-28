@@ -11,29 +11,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 $uriPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 $requestedFile = __DIR__ . $uriPath;
 
-if (is_file($requestedFile)) {
+/*
+|---------------------------------------------------------
+| Archivos estáticos reales
+|---------------------------------------------------------
+*/
+if (
+    $uriPath !== '/' &&
+    is_file($requestedFile) &&
+    !preg_match('/\.php$/i', $requestedFile)
+) {
     return false;
 }
 
-$rawBody = file_get_contents('php://input');
-$decodedJson = json_decode($rawBody, true) ?? [];
+/*
+|---------------------------------------------------------
+| DASHBOARD
+|---------------------------------------------------------
+| Estas rutas ejecutan dashboard.php
+*/
+if ($uriPath === '/dashboard' || $uriPath === '/dashboard.php') {
+    require __DIR__ . '/api/dashboard.php';
+    exit;
+}
 
-header("Content-Type: application/json; charset=utf-8");
+if ($uriPath === '/api/dashboard' || $uriPath === '/api/dashboard.php') {
+    require __DIR__ . '/api/dashboard.php';
+    exit;
+}
 
-/* =========================
-   API ROUTER
-========================= */
-
+/*
+|---------------------------------------------------------
+| API ROUTER
+|---------------------------------------------------------
+*/
 if (str_starts_with($uriPath, '/api/')) {
     require __DIR__ . '/api/index.php';
     exit;
 }
 
-/* =========================
-   PRINT ROUTER
-========================= */
+/*
+|---------------------------------------------------------
+| PRINT ROUTER
+|---------------------------------------------------------
+*/
+$rawBody = file_get_contents('php://input');
+$decodedJson = json_decode($rawBody, true) ?? [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($uriPath === '/' || $uriPath === '/print')) {
+    header("Content-Type: application/json; charset=utf-8");
+
     $printerName = $_POST['printerName'] ?? ($decodedJson['printerName'] ?? null);
     $filePath = $_POST['filePath'] ?? ($decodedJson['filePath'] ?? null);
 
@@ -102,5 +129,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($uriPath === '/' || $uriPath === '
     exit;
 }
 
+/*
+|---------------------------------------------------------
+| 404 JSON
+|---------------------------------------------------------
+*/
+header("Content-Type: application/json; charset=utf-8");
 http_response_code(404);
 echo json_encode(['error' => 'Ruta no encontrada']);

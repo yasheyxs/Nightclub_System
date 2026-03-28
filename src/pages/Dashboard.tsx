@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { KPICard } from "@/components/KPICard";
 import {
   DollarSign,
@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { api } from "@/services/api";
 
 interface Metrics {
   eventosMes: number;
@@ -33,7 +34,7 @@ interface CurrentNight {
 
 interface UpcomingEvent {
   id: string;
-  title: string;
+  name: string;
   date: string;
   ocupacion: number;
 }
@@ -65,8 +66,34 @@ interface DashboardResponse {
   monthlySummary: MonthlySummary;
 }
 
+const DASHBOARD_ENDPOINT_CANDIDATES = [
+  "/dashboard",
+  "/dashboard.php",
+  "/api/dashboard",
+  "/api/dashboard.php",
+];
+
+function isDashboardResponse(data: unknown): data is DashboardResponse {
+  if (!data || typeof data !== "object") return false;
+
+  const value = data as Record<string, unknown>;
+
+  return (
+    typeof value.metrics === "object" &&
+    Array.isArray(value.upcomingEvents) &&
+    Array.isArray(value.pastEvents) &&
+    typeof value.monthlySummary === "object"
+  );
+}
+
+function buildAbsoluteUrl(endpoint: string): string {
+  const baseURL = api.defaults.baseURL ?? "";
+  return new URL(endpoint, baseURL || window.location.origin).toString();
+}
+
 export default function Dashboard(): JSX.Element {
   const [loading, setLoading] = useState(true);
+  const [resolvedEndpoint, setResolvedEndpoint] = useState<string>("");
   const [metrics, setMetrics] = useState<Metrics>({
     eventosMes: 0,
     entradasMes: 0,
@@ -77,29 +104,86 @@ export default function Dashboard(): JSX.Element {
   const [upcomingEvents, setUpcomingEvents] = useState<UpcomingEvent[]>([]);
   const [pastEvents, setPastEvents] = useState<PastEvent[]>([]);
   const [monthlySummary, setMonthlySummary] = useState<MonthlySummary | null>(
-    null
+    null,
   );
 
   useEffect(() => {
-    fetch("https://santas-phpback.4jkbnu.easypanel.host/dashboard")
-      .then((res) => res.json() as Promise<DashboardResponse>)
-      .then((data) => {
-        setMetrics(data.metrics);
-        setCurrentNight(data.currentNight);
-        setUpcomingEvents(data.upcomingEvents);
-        setPastEvents(data.pastEvents);
-        setMonthlySummary(data.monthlySummary);
-      })
-      .catch((err) => console.error("Error al cargar dashboard:", err))
-      .finally(() => setLoading(false));
+    const cargarDashboard = async () => {
+      try {
+        let dashboardData: DashboardResponse | null = null;
+        let endpointEncontrado = "";
+
+        for (const endpoint of DASHBOARD_ENDPOINT_CANDIDATES) {
+          try {
+            const response = await api.get(endpoint, {
+              responseType: "text",
+              transformResponse: [(raw) => raw],
+            });
+
+            const raw =
+              typeof response.data === "string"
+                ? response.data.trim()
+                : String(response.data ?? "").trim();
+
+            if (
+              !raw ||
+              raw.startsWith("<!doctype") ||
+              raw.startsWith("<html")
+            ) {
+              continue;
+            }
+
+            const parsed = JSON.parse(raw);
+
+            if (isDashboardResponse(parsed)) {
+              dashboardData = parsed;
+              endpointEncontrado = endpoint;
+              break;
+            }
+          } catch {
+            // probar siguiente endpoint
+          }
+        }
+
+        if (!dashboardData) {
+          throw new Error(
+            "No se encontró un endpoint válido para el dashboard.",
+          );
+        }
+
+        setResolvedEndpoint(endpointEncontrado);
+        setMetrics(dashboardData.metrics);
+        setCurrentNight(dashboardData.currentNight);
+        setUpcomingEvents(dashboardData.upcomingEvents);
+        setPastEvents(dashboardData.pastEvents);
+        setMonthlySummary(dashboardData.monthlySummary);
+      } catch (err) {
+        console.error("Error al cargar dashboard:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    cargarDashboard();
   }, []);
+
+  const exportBaseUrl = useMemo(() => {
+    if (!resolvedEndpoint) return "";
+    return buildAbsoluteUrl(resolvedEndpoint);
+  }, [resolvedEndpoint]);
+
+  const handleExport = (type: "csv" | "pdf") => {
+    if (!exportBaseUrl) return;
+    const url = new URL(exportBaseUrl);
+    url.searchParams.set("export", type);
+    window.open(url.toString(), "_blank");
+  };
 
   const formatCurrency = (value: number) =>
     `$${new Intl.NumberFormat("es-AR").format(value)}`;
 
   return (
     <div className="space-y-8 animate-fade-in">
-      {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h2 className="text-4xl font-bold bg-gradient-primary bg-clip-text text-transparent">
@@ -109,32 +193,24 @@ export default function Dashboard(): JSX.Element {
             Seguimiento en tiempo real de eventos, ventas y recaudación
           </p>
         </div>
+
         <div className="flex gap-3">
           <Button
             variant="outline"
-            onClick={() =>
-              window.open(
-                "https://santas-phpback.4jkbnu.easypanel.host/dashboard?export=excel"
-              )
-            }
+            onClick={() => handleExport("csv")}
+            disabled={!exportBaseUrl}
           >
             <FileSpreadsheet className="w-4 h-4 mr-2" />
             Descargar Excel
           </Button>
-          <Button
-            onClick={() =>
-              window.open(
-                "https://santas-phpback.4jkbnu.easypanel.host/dashboard?export=pdf"
-              )
-            }
-          >
+
+          <Button onClick={() => handleExport("pdf")} disabled={!exportBaseUrl}>
             <FileText className="w-4 h-4 mr-2" />
             Descargar PDF
           </Button>
         </div>
       </div>
 
-      {/* KPIs */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <KPICard
           title="Eventos del Mes"
@@ -165,14 +241,13 @@ export default function Dashboard(): JSX.Element {
             loading
               ? "—"
               : `${new Intl.NumberFormat("es-AR").format(
-                  metrics.ocupacionPromedio
+                  metrics.ocupacionPromedio,
                 )}%`
           }
           icon={Activity}
         />
       </div>
 
-      {/* Noche en curso */}
       <Card className="bg-gradient-card border-border/50 shadow-card">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -196,7 +271,7 @@ export default function Dashboard(): JSX.Element {
                 <p className="text-sm text-muted-foreground">Entradas</p>
                 <p className="text-lg font-semibold">
                   {new Intl.NumberFormat("es-AR").format(
-                    currentNight.entradasVendidas
+                    currentNight.entradasVendidas,
                   )}
                 </p>
               </div>
@@ -219,7 +294,6 @@ export default function Dashboard(): JSX.Element {
         </CardContent>
       </Card>
 
-      {/* Próximos eventos */}
       <Card className="border-border shadow-card">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -240,7 +314,7 @@ export default function Dashboard(): JSX.Element {
                   className="flex justify-between items-center border border-border rounded-lg p-3"
                 >
                   <div>
-                    <p className="font-semibold">{e.title}</p>
+                    <p className="font-semibold">{e.name}</p>
                     <p className="text-sm text-muted-foreground">{e.date}</p>
                   </div>
                   <span className="text-sm font-medium text-primary">
@@ -253,7 +327,6 @@ export default function Dashboard(): JSX.Element {
         </CardContent>
       </Card>
 
-      {/* Eventos pasados */}
       <Card className="border-border shadow-card">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -292,7 +365,6 @@ export default function Dashboard(): JSX.Element {
         </CardContent>
       </Card>
 
-      {/* Resumen mensual */}
       <Card className="border-border shadow-card">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">

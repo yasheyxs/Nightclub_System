@@ -342,12 +342,14 @@ export default function Anticipadas() {
 
     setCreating(true);
     try {
+      const usuarioId = Number(localStorage.getItem("user_id"));
       const { data } = await api.post("/anticipadas", {
         accion: "crear",
         nombre: formData.nombre.trim(),
         dni: formData.dni.trim(),
         evento_id: formData.eventoId ? Number(formData.eventoId) : null,
         promotor_id: Number(formData.promotorId),
+        usuario_id: usuarioId,
         cantidad: formData.cantidad,
         incluye_trago: formData.incluyeTrago,
       });

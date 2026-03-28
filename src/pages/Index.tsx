@@ -80,6 +80,8 @@ interface DashboardResponse {
   monthlySummary: MonthlySummary;
 }
 
+const DASHBOARD_URL = "/api/dashboard.php";
+
 export default function Dashboard(): JSX.Element {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<DashboardResponse | null>(null);
@@ -88,23 +90,38 @@ export default function Dashboard(): JSX.Element {
   const [calendarDate, setCalendarDate] = useState<Date | null>(null);
   const [calendarMessage, setCalendarMessage] = useState<string | null>(null);
   const [selectedMonth, setSelectedMonth] = useState(
-    new Date().toISOString().slice(0, 7)
+    new Date().toISOString().slice(0, 7),
   );
 
   const fetchDashboard = useCallback(
     async (extraParams?: Record<string, string>) => {
       setLoading(true);
+
       try {
         const params = new URLSearchParams({ month: selectedMonth });
+
         if (extraParams) {
           Object.entries(extraParams).forEach(([key, value]) => {
             params.set(key, value);
           });
         }
-        const res = await fetch(
-          `https://santas-phpback.4jkbnu.easypanel.host/dashboard?${params.toString()}`
-        );
-        const json = (await res.json()) as DashboardResponse;
+
+        const res = await fetch(`${DASHBOARD_URL}?${params.toString()}`, {
+          method: "GET",
+        });
+
+        const raw = await res.text();
+        const trimmed = raw.trim().toLowerCase();
+
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}: ${raw}`);
+        }
+
+        if (trimmed.startsWith("<!doctype") || trimmed.startsWith("<html")) {
+          throw new Error("La ruta del dashboard devolvió HTML y no JSON.");
+        }
+
+        const json = JSON.parse(raw) as DashboardResponse;
         setData(json);
       } catch (err) {
         console.error("Error al cargar dashboard:", err);
@@ -112,7 +129,7 @@ export default function Dashboard(): JSX.Element {
         setLoading(false);
       }
     },
-    [selectedMonth]
+    [selectedMonth],
   );
 
   useEffect(() => {
@@ -123,6 +140,7 @@ export default function Dashboard(): JSX.Element {
     const [year, month] = selectedMonth
       .split("-")
       .map((value) => parseInt(value, 10));
+
     if (!Number.isNaN(year) && !Number.isNaN(month)) {
       setCalendarDate(new Date(year, month - 1, 1));
     }
@@ -130,6 +148,7 @@ export default function Dashboard(): JSX.Element {
 
   const formatCurrency = (v: number) =>
     `$${new Intl.NumberFormat("es-AR").format(v)}`;
+
   const formatDate = (iso: string) =>
     new Date(iso).toLocaleDateString("es-AR", {
       weekday: "short",
@@ -139,8 +158,9 @@ export default function Dashboard(): JSX.Element {
 
   const pastEvents = useMemo(() => {
     if (!data) return [];
+
     return [...data.pastEvents].sort(
-      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
     );
   }, [data]);
 
@@ -154,7 +174,7 @@ export default function Dashboard(): JSX.Element {
 
   const maxSelectableMonth = useMemo(
     () => new Date().toISOString().slice(0, 7),
-    []
+    [],
   );
 
   const handleMonthChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -162,14 +182,15 @@ export default function Dashboard(): JSX.Element {
     setSelectedMonth(event.target.value);
   };
 
-  // ---- Calendario filtrable ----
   const findEventByDate = (date: Date) => {
     if (!calendarEvents.length) return null;
+
     const target = date.toISOString().split("T")[0];
     return calendarEvents.find((e) => e.date.split("T")[0] === target) || null;
   };
 
   const lastClickRef = useRef<{ date: Date; time: number } | null>(null);
+
   const handleDayClick = (date: Date) => {
     const now = Date.now();
     const last = lastClickRef.current;
@@ -179,6 +200,7 @@ export default function Dashboard(): JSX.Element {
     if (isDouble) {
       setCalendarDate(date);
       const event = findEventByDate(date);
+
       if (!event) {
         setSelectedEvent(null);
         setCalendarMessage("No hay evento registrado este día.");
@@ -189,20 +211,21 @@ export default function Dashboard(): JSX.Element {
         setOpenSummary(true);
       }
     }
+
     lastClickRef.current = { date, time: now };
   };
 
   if (loading || !data) {
     return (
       <div className="flex justify-center py-20 text-muted-foreground">
-        <Loader2 className="h-5 w-5 animate-spin mr-2" /> Cargando dashboard...
+        <Loader2 className="h-5 w-5 animate-spin mr-2" />
+        Cargando dashboard...
       </div>
     );
   }
 
   return (
     <div className="space-y-8 animate-fade-in">
-      {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h2 className="text-4xl font-bold bg-gradient-primary bg-clip-text text-transparent">
@@ -212,6 +235,7 @@ export default function Dashboard(): JSX.Element {
             Seguimiento de ventas, eventos y ocupación
           </p>
         </div>
+
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <Input
             type="month"
@@ -220,29 +244,34 @@ export default function Dashboard(): JSX.Element {
             className="w-full sm:w-56"
             max={maxSelectableMonth}
           />
+
           <Button
             variant="outline"
             onClick={() =>
               window.open(
-                `https://santas-phpback.4jkbnu.easypanel.host/dashboard?month=${selectedMonth}&export=csv`
+                `${DASHBOARD_URL}?month=${selectedMonth}&export=csv`,
+                "_blank",
               )
             }
           >
-            <FileSpreadsheet className="w-4 h-4 mr-2" /> Excel
+            <FileSpreadsheet className="w-4 h-4 mr-2" />
+            Excel
           </Button>
+
           <Button
             onClick={() =>
               window.open(
-                `https://santas-phpback.4jkbnu.easypanel.host/dashboard?month=${selectedMonth}&export=pdf`
+                `${DASHBOARD_URL}?month=${selectedMonth}&export=pdf`,
+                "_blank",
               )
             }
           >
-            <FileText className="w-4 h-4 mr-2" /> PDF
+            <FileText className="w-4 h-4 mr-2" />
+            PDF
           </Button>
         </div>
       </div>
 
-      {/* KPIs */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <KPICard
           title="Eventos del Mes"
@@ -266,13 +295,14 @@ export default function Dashboard(): JSX.Element {
         />
       </div>
 
-      {/* Noche en curso */}
       <Card className="bg-gradient-card border-border/50 shadow-card">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <MoonStar className="w-5 h-5 text-primary" /> Noche en curso
+            <MoonStar className="w-5 h-5 text-primary" />
+            Noche en curso
           </CardTitle>
         </CardHeader>
+
         <CardContent>
           {data.currentNight ? (
             <div className="grid md:grid-cols-3 gap-6">
@@ -284,12 +314,14 @@ export default function Dashboard(): JSX.Element {
                   {data.currentNight.eventName}
                 </p>
               </div>
+
               <div>
                 <p className="text-sm text-muted-foreground">Entradas</p>
                 <p className="text-lg font-semibold">
                   {data.currentNight.entradasVendidas}
                 </p>
               </div>
+
               <div>
                 <p className="text-sm text-muted-foreground">Ocupación</p>
                 <Progress value={data.currentNight.ocupacion} className="h-2" />
@@ -306,7 +338,6 @@ export default function Dashboard(): JSX.Element {
         </CardContent>
       </Card>
 
-      {/* Calendario de eventos */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -314,6 +345,7 @@ export default function Dashboard(): JSX.Element {
             Calendario de eventos
           </CardTitle>
         </CardHeader>
+
         <CardContent>
           <div className="rounded-md border border-border bg-neutral-900 text-neutral-100 p-3 shadow-sm select-none">
             <CalendarView
@@ -323,8 +355,11 @@ export default function Dashboard(): JSX.Element {
               onClickDay={handleDayClick}
               tileClassName={({ date }) => {
                 const e = findEventByDate(date);
+
                 if (!e) return "";
+
                 if (e.cerrado) return "event-purple";
+
                 const eventDate = new Date(e.date);
                 return eventDate.getTime() >= Date.now()
                   ? "event-green"
@@ -332,20 +367,22 @@ export default function Dashboard(): JSX.Element {
               }}
               tileContent={({ date }) => {
                 const e = findEventByDate(date);
+
                 return e ? (
                   <div
                     className={`mt-1 h-1 w-1 mx-auto rounded-full ${
                       e.cerrado
                         ? "bg-purple-400"
                         : new Date(e.date).getTime() >= Date.now()
-                        ? "bg-green-400"
-                        : "bg-blue-400"
+                          ? "bg-green-400"
+                          : "bg-blue-400"
                     }`}
                   />
                 ) : null;
               }}
             />
           </div>
+
           <p className="text-xs text-muted-foreground mt-2">
             Doble clic sobre un día para ver si hay evento registrado o sus
             resultados.
@@ -353,19 +390,21 @@ export default function Dashboard(): JSX.Element {
         </CardContent>
       </Card>
 
-      {/* Listado de eventos */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <BarChart3 className="w-5 h-5 text-primary" /> Eventos y resultados
+            <BarChart3 className="w-5 h-5 text-primary" />
+            Eventos y resultados
           </CardTitle>
         </CardHeader>
+
         <CardContent className="space-y-3">
           {pastEvents.length === 0 && (
             <p className="text-sm text-muted-foreground">
               No hay eventos registrados para el mes seleccionado.
             </p>
           )}
+
           {pastEvents.map((e) => (
             <div
               key={e.id}
@@ -377,10 +416,12 @@ export default function Dashboard(): JSX.Element {
                   {formatDate(e.date)}
                 </p>
               </div>
+
               <div className="flex items-center gap-4">
                 <span className="text-sm text-muted-foreground">
                   {formatCurrency(e.recaudacion)}
                 </span>
+
                 <Button
                   size="sm"
                   variant="outline"
@@ -398,11 +439,11 @@ export default function Dashboard(): JSX.Element {
         </CardContent>
       </Card>
 
-      {/* Modal resumen */}
       <Dialog
         open={openSummary}
         onOpenChange={(open) => {
           setOpenSummary(open);
+
           if (!open) {
             setCalendarMessage(null);
             setSelectedEvent(null);
@@ -417,32 +458,38 @@ export default function Dashboard(): JSX.Element {
                 : calendarMessage || "Resumen del evento"}
             </DialogTitle>
           </DialogHeader>
+
           {calendarMessage && (
             <p className="text-sm text-muted-foreground">{calendarMessage}</p>
           )}
+
           {selectedEvent && !calendarMessage && (
             <div className="space-y-3">
               <div className="flex items-center justify-between text-sm text-muted-foreground">
                 <p>Fecha: {formatDate(selectedEvent.date)}</p>
+
                 <span
                   className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
                     selectedEvent.cerrado
                       ? "bg-purple-100/10 text-purple-300"
                       : new Date(selectedEvent.date).getTime() >= Date.now()
-                      ? "bg-green-100/10 text-green-300"
-                      : "bg-blue-100/10 text-blue-300"
+                        ? "bg-green-100/10 text-green-300"
+                        : "bg-blue-100/10 text-blue-300"
                   }`}
                 >
                   {selectedEvent.cerrado
                     ? "Evento cerrado"
                     : new Date(selectedEvent.date).getTime() >= Date.now()
-                    ? "Próximo evento"
-                    : "Evento registrado"}
+                      ? "Próximo evento"
+                      : "Evento registrado"}
                 </span>
               </div>
+
               <p>Entradas: {selectedEvent.entradasVendidas}</p>
               <p>Recaudación: {formatCurrency(selectedEvent.recaudacion)}</p>
+
               <Progress value={selectedEvent.ocupacion} className="h-2" />
+
               <p className="text-xs text-muted-foreground">
                 Ocupación {selectedEvent.ocupacion}%
               </p>
@@ -451,7 +498,6 @@ export default function Dashboard(): JSX.Element {
         </DialogContent>
       </Dialog>
 
-      {/* Estilo calendario */}
       <style
         dangerouslySetInnerHTML={{
           __html: `
@@ -492,7 +538,7 @@ export default function Dashboard(): JSX.Element {
             background-color: rgba(59, 130, 246, 0.15) !important;
           }
           .dark-calendar .react-calendar__tile--now {
-          background-color: rgba(147, 51, 234, 0.15) !important;
+            background-color: rgba(147, 51, 234, 0.15) !important;
             border-radius: 9999px;
           }
           .dark-calendar button:focus {
