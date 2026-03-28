@@ -1,5 +1,4 @@
 <?php
-file_put_contents(__DIR__ . '/dashboard-hit.txt', date('c') . PHP_EOL, FILE_APPEND);
 
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: GET, OPTIONS");
@@ -21,6 +20,7 @@ function sendCsvExport(string $filename, array $metrics, ?array $monthlySummary,
     $rows[] = ['Sección', 'Concepto', 'Valor'];
     $rows[] = ['Métricas del mes', 'Eventos del mes', $metrics['eventosMes']];
     $rows[] = ['Métricas del mes', 'Entradas vendidas', $metrics['entradasMes']];
+    $rows[] = ['Métricas del mes', 'Entradas escaneadas', $metrics['entradasEscaneadas'] ?? 0];
     $rows[] = ['Métricas del mes', 'Recaudación', number_format($metrics['recaudacionMes'], 2, ',', '.')];
     $rows[] = ['Métricas del mes', 'Ocupación promedio', $metrics['ocupacionPromedio'] . '%'];
 
@@ -156,6 +156,7 @@ function sendPdfExport(string $filename, array $metrics, ?array $monthlySummary,
     $lines[] = '';
     $lines[] = 'Eventos del mes: ' . $metrics['eventosMes'];
     $lines[] = 'Entradas vendidas: ' . $metrics['entradasMes'];
+    $lines[] = 'Entradas escaneadas: ' . ($metrics['entradasEscaneadas'] ?? 0);
     $lines[] = 'Recaudación: $' . number_format($metrics['recaudacionMes'], 2, ',', '.');
     $lines[] = 'Ocupación promedio: ' . $metrics['ocupacionPromedio'] . '%';
 
@@ -277,9 +278,21 @@ try {
     $metrics = [
         'eventosMes'        => (int)$m['eventos_mes'],
         'entradasMes'       => (int)$m['entradas_mes'],
+        'entradasEscaneadas' => 0,
         'recaudacionMes'    => (float)$m['recaudacion_mes'],
         'ocupacionPromedio' => $m['ocupacion_promedio'] !== null ? (int)$m['ocupacion_promedio'] : 0,
     ];
+
+    $scannedStmt = $pdo->query("
+        SELECT COUNT(a.id) AS entradas_escaneadas
+        FROM accesos_qr a
+        INNER JOIN ventas_entradas v ON v.id = a.venta_entrada_id
+        INNER JOIN eventos e ON e.id = v.evento_id
+        WHERE a.resultado = 'valido'
+          AND e.activo = TRUE
+    ");
+    $scannedRow = $scannedStmt->fetch();
+    $metrics['entradasEscaneadas'] = (int)($scannedRow['entradas_escaneadas'] ?? 0);
 
     // === 2. Noche en curso ===
     $currentSql = "

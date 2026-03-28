@@ -7,6 +7,7 @@ import {
   Settings,
   UserPlus,
   UserRound,
+  ScanQrCode,
   LogOut,
   X,
   type LucideIcon,
@@ -35,6 +36,12 @@ const navigation: NavigationItem[] = [
     name: "Entradas",
     href: "/entradas",
     icon: Ticket,
+    allowedRoles: ["admin", "vendedor"],
+  },
+  {
+    name: "QR Scanner",
+    href: "/qr-scanner",
+    icon: ScanQrCode,
     allowedRoles: ["admin", "vendedor"],
   },
   {
@@ -105,16 +112,8 @@ export function Sidebar({ isMobileOpen, onMobileClose }: SidebarProps) {
         "lg:translate-x-0",
       )}
     >
-      <div className="flex h-full flex-col gap-y-5 overflow-y-auto px-4 py-6">
-        <div className="flex h-14 shrink-0 items-center justify-between">
-          <div>
-            <p className="text-lg font-bold text-sidebar-foreground">
-              Santas Club
-            </p>
-            <p className="text-xs text-sidebar-foreground/70">
-              Panel administrativo
-            </p>
-          </div>
+      <div className="flex h-full flex-col gap-y-5 overflow-y-auto px-4 pt-0 pb-6">
+        <div className="flex items-center justify-end">
           <button
             type="button"
             onClick={onMobileClose}

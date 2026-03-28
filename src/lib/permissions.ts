@@ -3,6 +3,7 @@ export type RoleSlug = "admin" | "vendedor" | "promotor" | "unknown";
 const APP_ROUTES = [
   "/",
   "/entradas",
+  "/qr-scanner",
   "/anticipadas",
   "/promotores",
   "/eventos",
@@ -15,7 +16,7 @@ type AppRoute = (typeof APP_ROUTES)[number];
 
 const ROUTES_BY_ROLE: Record<RoleSlug, AppRoute[]> = {
   admin: [...APP_ROUTES],
-  vendedor: ["/entradas", "/anticipadas", "/listas"],
+  vendedor: ["/entradas", "/qr-scanner", "/anticipadas", "/listas"],
   promotor: [],
   unknown: ["/entradas"],
 };
@@ -57,12 +58,16 @@ export const getDefaultRoute = (role: RoleSlug): string => {
 export const isRouteAllowed = (pathname: string, role: RoleSlug): boolean => {
   const normalizedPath = normalizePath(pathname);
   const allowedRoutes = getAllowedRoutes(role);
+
   if (!allowedRoutes.length) return false;
+
   return allowedRoutes.some((route) => {
     const normalizedRoute = normalizePath(route);
+
     if (normalizedRoute === "/") {
       return normalizedPath === "/";
     }
+
     return (
       normalizedPath === normalizedRoute ||
       normalizedPath.startsWith(`${normalizedRoute}/`)
@@ -70,9 +75,13 @@ export const isRouteAllowed = (pathname: string, role: RoleSlug): boolean => {
   });
 };
 
-export const ensureAllowedRoute = (pathname: string, role: RoleSlug): string => {
+export const ensureAllowedRoute = (
+  pathname: string,
+  role: RoleSlug,
+): string => {
   if (isRouteAllowed(pathname, role)) {
     return normalizePath(pathname);
   }
+
   return getDefaultRoute(role);
 };

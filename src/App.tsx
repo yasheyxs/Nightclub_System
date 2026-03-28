@@ -12,6 +12,7 @@ import Anticipadas from "./pages/Anticipadas";
 import Promotores from "./pages/Promotores";
 import Configuracion from "./pages/Configuracion";
 import Usuarios from "./pages/Usuarios";
+import QrScanner from "./pages/QrScanner";
 import NotFound from "./pages/NotFound";
 import Login from "./pages/Login";
 import ForgotPassword from "./pages/ForgotPassword";
@@ -39,6 +40,7 @@ const App = () => (
                 <Route path="/anticipadas" element={<Anticipadas />} />
                 <Route path="/promotores" element={<Promotores />} />
                 <Route path="/usuarios" element={<Usuarios />} />
+                <Route path="/qr-scanner" element={<QrScanner />} />
                 <Route path="/configuracion" element={<Configuracion />} />
                 <Route path="*" element={<NotFound />} />
               </Route>

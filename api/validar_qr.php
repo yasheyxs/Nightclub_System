@@ -114,6 +114,21 @@ function registrarAccesoQr(
     ]);
 }
 
+function obtenerEntradasEscaneadasActivas(PDO $pdo): int
+{
+    $stmt = $pdo->query("
+        SELECT COUNT(a.id) AS entradas_escaneadas
+        FROM accesos_qr a
+        INNER JOIN ventas_entradas v ON v.id = a.venta_entrada_id
+        INNER JOIN eventos e ON e.id = v.evento_id
+        WHERE a.resultado = 'valido'
+          AND e.activo = TRUE
+    ");
+
+    $row = $stmt->fetch();
+    return (int)($row['entradas_escaneadas'] ?? 0);
+}
+
 try {
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         jsonResponse(405, [
@@ -174,7 +189,8 @@ try {
         jsonResponse(404, [
             'ok' => false,
             'resultado' => 'invalido',
-            'mensaje' => 'QR inválido. No existe una entrada asociada.'
+            'mensaje' => 'QR inválido. No existe una entrada asociada.',
+            'entradas_escaneadas' => obtenerEntradasEscaneadasActivas($pdo)
         ]);
     }
 
@@ -201,6 +217,7 @@ try {
             'ok' => false,
             'resultado' => 'anulado',
             'mensaje' => 'La entrada está anulada.',
+            'entradas_escaneadas' => obtenerEntradasEscaneadasActivas($pdo),
             'data' => [
                 'venta_id' => $ventaId,
                 'entrada' => $venta['entrada_nombre'],
@@ -232,6 +249,7 @@ try {
             'ok' => false,
             'resultado' => 'usado',
             'mensaje' => 'La entrada ya fue utilizada.',
+            'entradas_escaneadas' => obtenerEntradasEscaneadasActivas($pdo),
             'data' => [
                 'venta_id' => $ventaId,
                 'entrada' => $venta['entrada_nombre'],
@@ -263,6 +281,7 @@ try {
             'ok' => false,
             'resultado' => 'invalido',
             'mensaje' => 'La entrada no está en un estado válido para ingresar.',
+            'entradas_escaneadas' => obtenerEntradasEscaneadasActivas($pdo),
             'data' => [
                 'venta_id' => $ventaId,
                 'estado' => $venta['estado']
@@ -301,6 +320,7 @@ try {
         'ok' => true,
         'resultado' => 'valido',
         'mensaje' => 'Ingreso válido.',
+        'entradas_escaneadas' => obtenerEntradasEscaneadasActivas($pdo),
         'data' => [
             'venta_id' => $ventaId,
             'entrada' => $venta['entrada_nombre'],

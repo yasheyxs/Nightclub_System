@@ -17,6 +17,7 @@ import {
   MoonStar,
   Loader2,
   BarChart3,
+  ScanQrCode,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,6 +35,7 @@ import "react-calendar/dist/Calendar.css";
 interface Metrics {
   eventosMes: number;
   entradasMes: number;
+  entradasEscaneadas: number;
   recaudacionMes: number;
   ocupacionPromedio: number;
 }
@@ -272,7 +274,7 @@ export default function Dashboard(): JSX.Element {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6">
         <KPICard
           title="Eventos del Mes"
           value={data.metrics.eventosMes.toString()}
@@ -282,6 +284,11 @@ export default function Dashboard(): JSX.Element {
           title="Entradas Vendidas"
           value={data.metrics.entradasMes.toLocaleString("es-AR")}
           icon={TrendingUp}
+        />
+        <KPICard
+          title="Entradas Escaneadas"
+          value={data.metrics.entradasEscaneadas.toLocaleString("es-AR")}
+          icon={ScanQrCode}
         />
         <KPICard
           title="Recaudación Mensual"
