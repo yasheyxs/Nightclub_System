@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "b4d852e28edce063e92e1e8d901f089c",
+    "content-hash": "ccaace53881bceb4940a13ee7bfaa0ee",
     "packages": [
         {
             "name": "bacon/bacon-qr-code",
@@ -545,6 +545,56 @@
                 }
             ],
             "time": "2025-07-13T19:59:45+00:00"
+        },
+        {
+            "name": "esyede/tiny-qrcode",
+            "version": "v1.0.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/esyede/tiny-qrcode.git",
+                "reference": "29316ceb52236eb70ddf610ca5f5c630f7345882"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/esyede/tiny-qrcode/zipball/29316ceb52236eb70ddf610ca5f5c630f7345882",
+                "reference": "29316ceb52236eb70ddf610ca5f5c630f7345882",
+                "shasum": ""
+            },
+            "require": {
+                "ext-gd": "*",
+                "php": ">=5.4.0"
+            },
+            "type": "library",
+            "autoload": {
+                "files": [
+                    "TinyQRCode.php"
+                ]
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Suyadi",
+                    "email": "suyadi.1992@gmail.com",
+                    "homepage": "https://github.com/esyede/tiny-qrcode",
+                    "role": "Creator"
+                }
+            ],
+            "description": "A tiny QRCode generator (single file, no dependencies)",
+            "homepage": "https://github.com/esyede/tiny-qrcode",
+            "keywords": [
+                "php",
+                "qr",
+                "qr-code",
+                "qrcode"
+            ],
+            "support": {
+                "issues": "https://github.com/esyede/tiny-qrcode/issues?state=open",
+                "source": "https://github.com/esyede/tiny-qrcode"
+            },
+            "time": "2022-12-08T10:41:09+00:00"
         },
         {
             "name": "firebase/php-jwt",

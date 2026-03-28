@@ -30,6 +30,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 
 import { api } from "@/services/api";
+import axios, { AxiosError } from "axios";
 
 interface EventOption {
   id: number;
@@ -323,6 +324,11 @@ export default function Entradas() {
   };
 
   const registrarVenta = async () => {
+    const usuarioId = Number(
+      localStorage.getItem("usuario_id") ||
+        localStorage.getItem("user_id") ||
+        localStorage.getItem("id"),
+    );
     if (!selectedEvent || sellingEntradaId === null) {
       toast({
         title: "Datos incompletos",
@@ -373,6 +379,7 @@ export default function Entradas() {
           entrada_id: sellingEntradaId,
           cantidad: cantidadVenta,
           incluye_trago: incluyeTrago,
+          usuario_id: usuarioId,
         };
 
         const { data } = await api.post("/venta_entradas", payload);
@@ -455,14 +462,51 @@ export default function Entradas() {
       }
 
       cerrarVenta();
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("Error al registrar operación:", error);
+
+      let backendMessage = "Reintentá en unos segundos.";
+
+      if (axios.isAxiosError(error)) {
+        const responseData = error.response?.data;
+
+        console.error("Status backend:", error.response?.status);
+        console.error("Data backend cruda:", responseData);
+        console.error(
+          "Data backend stringify:",
+          typeof responseData === "string"
+            ? responseData
+            : JSON.stringify(responseData, null, 2),
+        );
+
+        if (
+          typeof responseData === "object" &&
+          responseData !== null &&
+          "error" in responseData &&
+          typeof responseData.error === "string"
+        ) {
+          backendMessage = responseData.error;
+        } else if (
+          typeof responseData === "object" &&
+          responseData !== null &&
+          "message" in responseData &&
+          typeof responseData.message === "string"
+        ) {
+          backendMessage = responseData.message;
+        } else if (
+          typeof responseData === "string" &&
+          responseData.trim() !== ""
+        ) {
+          backendMessage = responseData;
+        }
+      }
+
       toast({
         title:
           tipoOperacion === "resta"
             ? "No se pudo anular la entrada"
             : "No se pudo registrar la venta",
-        description: "Reintentá en unos segundos.",
+        description: backendMessage,
         variant: "destructive",
       });
     } finally {

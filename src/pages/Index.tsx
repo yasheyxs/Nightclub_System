@@ -82,7 +82,7 @@ interface DashboardResponse {
   monthlySummary: MonthlySummary;
 }
 
-const DASHBOARD_URL = "/api/dashboard.php";
+const DASHBOARD_URL = "http://127.0.0.1:9000/api/dashboard.php";
 
 export default function Dashboard(): JSX.Element {
   const [loading, setLoading] = useState(true);

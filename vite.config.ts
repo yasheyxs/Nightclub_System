@@ -8,11 +8,15 @@ export default defineConfig(({ mode }) => ({
     host: "::",
     port: 8080,
     proxy: {
+      "/api": {
+        target: "http://localhost:8000",
+        changeOrigin: true,
+      },
       "/dashboard": {
         target: "http://localhost:8000",
         changeOrigin: true,
       },
-      "/api/dashboard": {
+      "/print": {
         target: "http://localhost:8000",
         changeOrigin: true,
       },
