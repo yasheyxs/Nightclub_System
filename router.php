@@ -62,6 +62,11 @@ if ($uriPath === '/api/promotores_cupos' || $uriPath === '/api/promotores_cupos.
     exit;
 }
 
+if ($uriPath === '/api/login' || $uriPath === '/api/login.php') {
+    require __DIR__ . '/api/login.php';
+    exit;
+}
+
 /*
 |--------------------------------------------------------------------------
 | Catch-all para otras rutas /api/*

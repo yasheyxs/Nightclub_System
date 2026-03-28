@@ -168,7 +168,7 @@ try {
 
             if (!$promotorId) {
                 http_response_code(400);
-                echo json_encode(['error' => 'Debe indicar un promotor para asignar el cupo.']);
+                echo json_encode(['error' => 'Debe indicar un vendedor para registrar la venta.']);
                 exit;
             }
 
@@ -178,21 +178,48 @@ try {
                 exit;
             }
 
-            $usuarioStmt = $pdo->prepare('
-                SELECT id
+            $usuarioStmt = $pdo->prepare(<<<SQL
+                SELECT
+                    u.id,
+                    COALESCE(r.nombre, u.rol, '') AS rol_nombre
                 FROM usuarios
-                WHERE id = :id
-                  AND activo = true
+                u
+                LEFT JOIN roles r ON r.id = u.rol_id
+                WHERE u.id = :id
+                  AND u.activo = true
                 LIMIT 1
-            ');
+            SQL);
+
             $usuarioStmt->execute([':id' => $usuarioId]);
-            $usuarioExiste = $usuarioStmt->fetchColumn();
+            $usuarioExiste = $usuarioStmt->fetch();
 
             if (!$usuarioExiste) {
                 http_response_code(400);
                 echo json_encode(['error' => 'El usuario vendedor indicado no existe o está inactivo.']);
                 exit;
             }
+
+            $vendedorStmt = $pdo->prepare(<<<SQL
+                SELECT
+                    u.id,
+                    COALESCE(r.nombre, u.rol, '') AS rol_nombre
+                FROM usuarios u
+                LEFT JOIN roles r ON r.id = u.rol_id
+                WHERE u.id = :id
+                  AND u.activo = true
+                LIMIT 1
+            SQL);
+            $vendedorStmt->execute([':id' => $promotorId]);
+            $vendedorData = $vendedorStmt->fetch();
+
+            if (!$vendedorData) {
+                http_response_code(400);
+                echo json_encode(['error' => 'El vendedor seleccionado no existe o está inactivo.']);
+                exit;
+            }
+
+            $vendedorRol = strtolower(trim((string) ($vendedorData['rol_nombre'] ?? '')));
+            $vendedorEsPromotor = in_array($vendedorRol, ['promotor', 'promoter'], true);
 
             $entradaStmt = $pdo->prepare(<<<SQL
                 SELECT id, precio_base, nombre
@@ -215,60 +242,62 @@ try {
             $pdo->beginTransaction();
 
             try {
-                $cupoStmt = $pdo->prepare(<<<SQL
-                    SELECT id, cupo_total, cupo_vendido
-                    FROM promotores_cupos
-                    WHERE usuario_id = :usuario_id
-                      AND evento_id = :evento_id
-                      AND entrada_id = :entrada_id
-                    ORDER BY id ASC
-                    FOR UPDATE
-                    LIMIT 1
-                SQL);
-                $cupoStmt->execute([
-                    ':usuario_id' => $promotorId,
-                    ':evento_id' => $eventoId,
-                    ':entrada_id' => $entradaId,
-                ]);
-                $cupo = $cupoStmt->fetch();
-
-                if (!$cupo) {
-                    $insertCupoStmt = $pdo->prepare(<<<SQL
-                        INSERT INTO promotores_cupos (usuario_id, evento_id, entrada_id)
-                        VALUES (:usuario_id, :evento_id, :entrada_id)
-                        RETURNING id, cupo_total, cupo_vendido
+                if ($vendedorEsPromotor) {
+                    $cupoStmt = $pdo->prepare(<<<SQL
+                        SELECT id, cupo_total, cupo_vendido
+                        FROM promotores_cupos
+                        WHERE usuario_id = :usuario_id
+                          AND evento_id = :evento_id
+                          AND entrada_id = :entrada_id
+                        ORDER BY id ASC
+                        FOR UPDATE
+                        LIMIT 1
                     SQL);
-                    $insertCupoStmt->execute([
+                    $cupoStmt->execute([
                         ':usuario_id' => $promotorId,
                         ':evento_id' => $eventoId,
                         ':entrada_id' => $entradaId,
                     ]);
-                    $cupo = $insertCupoStmt->fetch();
-                }
+                    $cupo = $cupoStmt->fetch();
 
-                $cupoTotal = isset($cupo['cupo_total']) ? (int) $cupo['cupo_total'] : 0;
-                $cupoVendido = isset($cupo['cupo_vendido']) ? (int) $cupo['cupo_vendido'] : 0;
-                $cupoDisponible = $cupoTotal - $cupoVendido;
+                    if (!$cupo) {
+                        $insertCupoStmt = $pdo->prepare(<<<SQL
+                            INSERT INTO promotores_cupos (usuario_id, evento_id, entrada_id)
+                            VALUES (:usuario_id, :evento_id, :entrada_id)
+                            RETURNING id, cupo_total, cupo_vendido
+                        SQL);
+                        $insertCupoStmt->execute([
+                            ':usuario_id' => $promotorId,
+                            ':evento_id' => $eventoId,
+                            ':entrada_id' => $entradaId,
+                        ]);
+                        $cupo = $insertCupoStmt->fetch();
+                    }
 
-                if ($cantidad > $cupoDisponible) {
-                    $pdo->rollBack();
-                    http_response_code(409);
-                    echo json_encode([
-                        'error' => 'No hay cupo suficiente para esta venta.',
-                        'cupo_disponible' => $cupoDisponible,
+                    $cupoTotal = isset($cupo['cupo_total']) ? (int) $cupo['cupo_total'] : 0;
+                    $cupoVendido = isset($cupo['cupo_vendido']) ? (int) $cupo['cupo_vendido'] : 0;
+                    $cupoDisponible = $cupoTotal - $cupoVendido;
+
+                    if ($cantidad > $cupoDisponible) {
+                        $pdo->rollBack();
+                        http_response_code(409);
+                        echo json_encode([
+                            'error' => 'No hay cupo suficiente para esta venta.',
+                            'cupo_disponible' => $cupoDisponible,
+                        ]);
+                        exit;
+                    }
+
+                    $updateCupoStmt = $pdo->prepare(<<<SQL
+                        UPDATE promotores_cupos
+                        SET cupo_vendido = cupo_vendido + :cantidad
+                        WHERE id = :id
+                    SQL);
+                    $updateCupoStmt->execute([
+                        ':cantidad' => $cantidad,
+                        ':id' => $cupo['id'],
                     ]);
-                    exit;
                 }
-
-                $updateCupoStmt = $pdo->prepare(<<<SQL
-                    UPDATE promotores_cupos
-                    SET cupo_vendido = cupo_vendido + :cantidad
-                    WHERE id = :id
-                SQL);
-                $updateCupoStmt->execute([
-                    ':cantidad' => $cantidad,
-                    ':id' => $cupo['id'],
-                ]);
 
                 $insertVentaStmt = $pdo->prepare(<<<SQL
                     INSERT INTO ventas_entradas

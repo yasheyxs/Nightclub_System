@@ -18,10 +18,81 @@ import {
   type RoleSlug,
 } from "@/lib/permissions";
 
+type AuthenticatedUserLike = {
+  id?: number | string | null;
+  user_id?: number | string | null;
+  usuario_id?: number | string | null;
+  idUsuario?: number | string | null;
+  nombre?: string | null;
+  email?: string | null;
+  rol_id?: number | string | null;
+  rol_nombre?: string | null;
+  rol_slug?: string | null;
+  roleSlug?: RoleSlug | null;
+  token?: string | null;
+  user?: {
+    id?: number | string | null;
+    user_id?: number | string | null;
+    usuario_id?: number | string | null;
+    idUsuario?: number | string | null;
+    nombre?: string | null;
+    email?: string | null;
+    rol_id?: number | string | null;
+    rol_nombre?: string | null;
+    rol_slug?: string | null;
+    roleSlug?: RoleSlug | null;
+  } | null;
+};
+
+const extractNumericId = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+
+  return null;
+};
+
+const persistAuthenticatedUser = (authenticatedUser: AuthenticatedUserLike) => {
+  const normalizedUser = authenticatedUser?.user ?? authenticatedUser ?? null;
+
+  if (!normalizedUser) {
+    return;
+  }
+
+  const userId =
+    extractNumericId(normalizedUser.id) ??
+    extractNumericId(normalizedUser.user_id) ??
+    extractNumericId(normalizedUser.usuario_id) ??
+    extractNumericId(normalizedUser.idUsuario);
+
+  localStorage.setItem("user", JSON.stringify(normalizedUser));
+  localStorage.setItem("authUser", JSON.stringify(normalizedUser));
+
+  if (userId !== null) {
+    const userIdString = String(userId);
+    localStorage.setItem("user_id", userIdString);
+    localStorage.setItem("usuario_id", userIdString);
+    localStorage.setItem("id", userIdString);
+    localStorage.setItem("idUsuario", userIdString);
+  }
+
+  if ("token" in authenticatedUser && authenticatedUser.token) {
+    localStorage.setItem("token", authenticatedUser.token);
+  }
+};
+
 const Login = () => {
   const { login, user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+
   const [telefono, setTelefono] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -36,7 +107,6 @@ const Login = () => {
       return;
     }
 
-    // Validar formato de teléfono
     const phonePattern = /^[0-9]{10,}$/;
     if (!phonePattern.test(telefono)) {
       toast.error("Por favor ingresa un teléfono válido");
@@ -44,14 +114,25 @@ const Login = () => {
     }
 
     setLoading(true);
+
     try {
-      const authenticatedUser = await login(telefono, password);
+      const authenticatedUser = (await login(
+        telefono,
+        password,
+      )) as AuthenticatedUserLike;
+
+      persistAuthenticatedUser(authenticatedUser);
+
+      const normalizedUser = authenticatedUser?.user ?? authenticatedUser;
+
       const roleSlug: RoleSlug =
-        authenticatedUser.roleSlug ??
+        normalizedUser.roleSlug ??
         normalizeRoleSlug(
-          authenticatedUser.rol_slug ?? authenticatedUser.rol_nombre ?? null
+          normalizedUser.rol_slug ?? normalizedUser.rol_nombre ?? null,
         );
+
       toast.success("Sesión iniciada correctamente");
+
       const destination = ensureAllowedRoute(from, roleSlug);
       navigate(destination, { replace: true });
     } catch (error) {
@@ -65,9 +146,13 @@ const Login = () => {
 
   useEffect(() => {
     if (!user) return;
+
+    persistAuthenticatedUser(user as AuthenticatedUserLike);
+
     const roleSlug: RoleSlug =
       user.roleSlug ??
       normalizeRoleSlug(user.rol_slug ?? user.rol_nombre ?? null);
+
     const destination = ensureAllowedRoute(from, roleSlug);
     navigate(destination, { replace: true });
   }, [from, navigate, user]);
@@ -83,17 +168,21 @@ const Login = () => {
           <Label htmlFor="telefono" className="text-foreground">
             Teléfono
           </Label>
+
           <div className="relative">
-            <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+            <Phone className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
+
             <Input
               id="telefono"
               type="tel"
               autoComplete="tel"
-              className="pl-10 bg-surface-elevated border-border text-black placeholder:text-muted-foreground"
-              placeholder="351 555 4444"
+              className="border-border bg-surface-elevated pl-10 text-black placeholder:text-muted-foreground"
+              placeholder="3515554444"
               value={telefono}
-              onChange={(event) => setTelefono(event.target.value)}
-              pattern="^[0-9]{10,}$" // Validación de 10 dígitos mínimo
+              onChange={(event) =>
+                setTelefono(event.target.value.replace(/\D/g, ""))
+              }
+              pattern="^[0-9]{10,}$"
             />
           </div>
         </div>
@@ -102,13 +191,15 @@ const Login = () => {
           <Label htmlFor="password" className="text-foreground">
             Contraseña
           </Label>
+
           <div className="relative">
-            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+            <Lock className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
+
             <Input
               id="password"
               type="password"
               autoComplete="current-password"
-              className="pl-10 bg-surface-elevated border-border text-black placeholder:text-muted-foreground"
+              className="border-border bg-surface-elevated pl-10 text-black placeholder:text-muted-foreground"
               placeholder="••••••••"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
@@ -119,7 +210,7 @@ const Login = () => {
         <Button
           type="submit"
           disabled={loading}
-          className="w-full bg-gradient-primary shadow-neon hover:shadow-neon-intense transition-all"
+          className="w-full bg-gradient-primary shadow-neon transition-all hover:shadow-neon-intense"
         >
           {loading ? "Ingresando..." : "Ingresar"}
         </Button>

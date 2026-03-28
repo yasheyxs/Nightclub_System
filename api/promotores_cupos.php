@@ -21,47 +21,48 @@ try {
     $pdo = new PDO(
         "pgsql:host=$host;port=$port;dbname=$dbname;user=$user;password=$password;sslmode=require"
     );
+
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-
-    $pdo->exec(<<<SQL
-        CREATE TABLE IF NOT EXISTS promotores_cupos (
-            id SERIAL PRIMARY KEY,
-            usuario_id INTEGER NOT NULL,
-            evento_id INTEGER NOT NULL,
-            entrada_id INTEGER NOT NULL,
-            cupo_total INTEGER NOT NULL DEFAULT 50,
-            cupo_vendido INTEGER NOT NULL DEFAULT 0,
-            fecha_creacion TIMESTAMP WITHOUT TIME ZONE DEFAULT NOW()
-        );
-    SQL);
 
     $method = $_SERVER['REQUEST_METHOD'];
 
     if ($method === 'GET') {
-        $eventoId = isset($_GET['evento_id']) ? (int) $_GET['evento_id'] : null;
-        $entradaId = isset($_GET['entrada_id']) ? (int) $_GET['entrada_id'] : null;
+        $eventoId = isset($_GET['evento_id']) ? (int) $_GET['evento_id'] : 0;
+        $entradaId = isset($_GET['entrada_id']) ? (int) $_GET['entrada_id'] : 0;
 
-        if (!$eventoId || !$entradaId) {
+        if ($eventoId <= 0 || $entradaId <= 0) {
             http_response_code(400);
-            echo json_encode(['error' => 'Debe indicar evento_id y entrada_id.']);
+            echo json_encode([
+                'error' => 'Debe indicar evento_id y entrada_id.'
+            ], JSON_UNESCAPED_UNICODE);
             exit;
         }
 
-        $usuariosStmt = $pdo->query(<<<SQL
-        SELECT
+        $usuariosStmt = $pdo->prepare(<<<SQL
+            SELECT
                 u.id AS usuario_id,
-                u.nombre AS usuario_nombre
+                u.nombre AS usuario_nombre,
+                LOWER(TRIM(r.nombre)) AS usuario_rol
             FROM usuarios u
+            INNER JOIN roles r
+                ON r.id = u.rol_id
             WHERE u.activo = true
-            AND LOWER(TRIM(u.rol)) = 'promotor'
+              AND LOWER(TRIM(r.nombre)) IN (
+                    'promotor',
+                    'promoter',
+                    'admin',
+                    'administrador',
+                    'owner'
+              )
             ORDER BY u.nombre ASC
         SQL);
 
+        $usuariosStmt->execute();
         $usuarios = $usuariosStmt->fetchAll();
 
         if (!$usuarios) {
-            echo json_encode([]);
+            echo json_encode([], JSON_UNESCAPED_UNICODE);
             exit;
         }
 
@@ -72,7 +73,7 @@ try {
 
         $cuposPorUsuario = [];
 
-        if (count($usuarioIds) > 0) {
+        if (!empty($usuarioIds)) {
             $placeholders = implode(',', array_fill(0, count($usuarioIds), '?'));
 
             $cuposStmt = $pdo->prepare(
@@ -100,17 +101,22 @@ try {
 
         foreach ($usuarios as $usuario) {
             $userId = (int) $usuario['usuario_id'];
+            $rolRaw = strtolower(trim((string) $usuario['usuario_rol']));
+            $esPromotor = in_array($rolRaw, ['promotor', 'promoter'], true);
+
             $cupo = $cuposPorUsuario[$userId] ?? null;
 
-            $tieneCupo = $cupo !== null;
+            $tieneCupo = $esPromotor && $cupo !== null;
             $cupoTotal = $tieneCupo ? (int) $cupo['cupo_total'] : null;
             $cupoVendido = $tieneCupo ? (int) $cupo['cupo_vendido'] : null;
-            $cupoDisponible = $tieneCupo ? ($cupoTotal - $cupoVendido) : null;
+            $cupoDisponible = $tieneCupo ? max(0, $cupoTotal - $cupoVendido) : null;
 
             $response[] = [
                 'id' => $tieneCupo ? (int) $cupo['id'] : null,
                 'usuario_id' => $userId,
                 'usuario_nombre' => $usuario['usuario_nombre'],
+                'usuario_rol' => $rolRaw,
+                'es_promotor' => $esPromotor,
                 'evento_id' => $eventoId,
                 'entrada_id' => $entradaId,
                 'cupo_total' => $cupoTotal,
@@ -127,16 +133,49 @@ try {
     if ($method === 'POST') {
         $input = json_decode(file_get_contents('php://input'), true);
 
-        $usuarioId = isset($input['usuario_id']) ? (int) $input['usuario_id'] : null;
-        $eventoId = isset($input['evento_id']) ? (int) $input['evento_id'] : null;
-        $entradaId = isset($input['entrada_id']) ? (int) $input['entrada_id'] : null;
+        $usuarioId = isset($input['usuario_id']) ? (int) $input['usuario_id'] : 0;
+        $eventoId = isset($input['evento_id']) ? (int) $input['evento_id'] : 0;
+        $entradaId = isset($input['entrada_id']) ? (int) $input['entrada_id'] : 0;
         $cupoTotal = isset($input['cupo_total']) ? (int) $input['cupo_total'] : null;
 
-        if (!$usuarioId || !$eventoId || !$entradaId || $cupoTotal === null) {
+        if ($usuarioId <= 0 || $eventoId <= 0 || $entradaId <= 0 || $cupoTotal === null) {
             http_response_code(400);
             echo json_encode([
                 'error' => 'usuario_id, evento_id, entrada_id y cupo_total son obligatorios.'
-            ]);
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        $rolStmt = $pdo->prepare(<<<SQL
+            SELECT LOWER(TRIM(r.nombre)) AS rol
+            FROM usuarios u
+            INNER JOIN roles r
+                ON r.id = u.rol_id
+            WHERE u.id = :usuario_id
+            LIMIT 1
+        SQL);
+
+        $rolStmt->execute([
+            ':usuario_id' => $usuarioId,
+        ]);
+
+        $rolUsuario = $rolStmt->fetchColumn();
+
+        if (!$rolUsuario) {
+            http_response_code(404);
+            echo json_encode([
+                'error' => 'No se encontró el usuario indicado.'
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        $esPromotor = in_array($rolUsuario, ['promotor', 'promoter'], true);
+
+        if (!$esPromotor) {
+            http_response_code(400);
+            echo json_encode([
+                'error' => 'Solo se pueden asignar cupos a usuarios con rol promotor.'
+            ], JSON_UNESCAPED_UNICODE);
             exit;
         }
 
@@ -151,7 +190,7 @@ try {
                   AND entrada_id = :entrada_id
                 ORDER BY id ASC
                 FOR UPDATE
-                LIMIT 1;
+                LIMIT 1
             SQL);
 
             $stmt->execute([
@@ -167,7 +206,7 @@ try {
                     UPDATE promotores_cupos
                     SET cupo_total = :cupo_total
                     WHERE id = :id
-                    RETURNING id, usuario_id, evento_id, entrada_id, cupo_total, cupo_vendido;
+                    RETURNING id, usuario_id, evento_id, entrada_id, cupo_total, cupo_vendido
                 SQL);
 
                 $saveStmt->execute([
@@ -176,9 +215,19 @@ try {
                 ]);
             } else {
                 $saveStmt = $pdo->prepare(<<<SQL
-                    INSERT INTO promotores_cupos (usuario_id, evento_id, entrada_id, cupo_total)
-                    VALUES (:usuario_id, :evento_id, :entrada_id, :cupo_total)
-                    RETURNING id, usuario_id, evento_id, entrada_id, cupo_total, cupo_vendido;
+                    INSERT INTO promotores_cupos (
+                        usuario_id,
+                        evento_id,
+                        entrada_id,
+                        cupo_total
+                    )
+                    VALUES (
+                        :usuario_id,
+                        :evento_id,
+                        :entrada_id,
+                        :cupo_total
+                    )
+                    RETURNING id, usuario_id, evento_id, entrada_id, cupo_total, cupo_vendido
                 SQL);
 
                 $saveStmt->execute([
@@ -199,7 +248,7 @@ try {
                 'entrada_id' => (int) $row['entrada_id'],
                 'cupo_total' => (int) $row['cupo_total'],
                 'cupo_vendido' => (int) $row['cupo_vendido'],
-                'cupo_disponible' => (int) $row['cupo_total'] - (int) $row['cupo_vendido'],
+                'cupo_disponible' => max(0, (int) $row['cupo_total'] - (int) $row['cupo_vendido']),
                 'tiene_cupo' => true,
             ], JSON_UNESCAPED_UNICODE);
             exit;
@@ -210,11 +259,17 @@ try {
     }
 
     http_response_code(405);
-    echo json_encode(['error' => 'Método no permitido.']);
+    echo json_encode([
+        'error' => 'Método no permitido.'
+    ], JSON_UNESCAPED_UNICODE);
 } catch (PDOException $e) {
     http_response_code(500);
-    echo json_encode(['error' => $e->getMessage()]);
+    echo json_encode([
+        'error' => 'PDO: ' . $e->getMessage()
+    ], JSON_UNESCAPED_UNICODE);
 } catch (Throwable $e) {
     http_response_code(500);
-    echo json_encode(['error' => 'Error inesperado: ' . $e->getMessage()]);
+    echo json_encode([
+        'error' => 'Error inesperado: ' . $e->getMessage()
+    ], JSON_UNESCAPED_UNICODE);
 }

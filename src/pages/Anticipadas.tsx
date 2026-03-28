@@ -83,6 +83,8 @@ interface VendedorOption {
   id?: number | null;
   usuario_id: number;
   usuario_nombre: string;
+  usuario_rol?: string | null;
+  es_promotor?: boolean;
   evento_id: number;
   entrada_id: number;
   cupo_total: number | null;
@@ -558,6 +560,8 @@ export default function Anticipadas() {
     (vendedor) => String(vendedor.usuario_id) === formData.promotorId,
   );
 
+  const selectedVendedorEsPromotor = selectedVendedor?.es_promotor === true;
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -746,6 +750,7 @@ export default function Anticipadas() {
                   </Select>
 
                   {selectedVendedor &&
+                    selectedVendedorEsPromotor &&
                     selectedVendedor.tiene_cupo === true &&
                     typeof selectedVendedor.cupo_disponible === "number" && (
                       <p className="text-xs text-muted-foreground">
