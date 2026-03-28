@@ -79,15 +79,16 @@ interface EventoOption {
   fecha: string | null;
 }
 
-interface PromotorCupo {
+interface VendedorOption {
   id?: number | null;
   usuario_id: number;
   usuario_nombre: string;
   evento_id: number;
   entrada_id: number;
-  cupo_total: number;
-  cupo_vendido: number;
-  cupo_disponible: number;
+  cupo_total: number | null;
+  cupo_vendido: number | null;
+  cupo_disponible: number | null;
+  tiene_cupo: boolean;
 }
 
 const normalizeEntradaName = (name: string) =>
@@ -106,6 +107,79 @@ const mapAnticipada = (item: AnticipadaResponse): AnticipadaItem => ({
   eventoNombre: item.evento_nombre ?? "—",
 });
 
+const parseJsonSafe = (value: string | null) => {
+  if (!value) return null;
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+};
+
+const extractNumericId = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+};
+
+const getLoggedUserId = (): number | null => {
+  const candidates = [
+    localStorage.getItem("user_id"),
+    localStorage.getItem("usuario_id"),
+    localStorage.getItem("id"),
+    localStorage.getItem("idUsuario"),
+  ];
+
+  for (const raw of candidates) {
+    if (!raw) continue;
+
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+
+  const jsonKeys = ["user", "usuario", "auth", "session", "authUser"];
+
+  for (const key of jsonKeys) {
+    const raw = localStorage.getItem(key);
+    if (!raw) continue;
+
+    try {
+      const data = JSON.parse(raw);
+
+      const nestedCandidates = [
+        data?.id,
+        data?.user_id,
+        data?.usuario_id,
+        data?.idUsuario,
+        data?.user?.id,
+        data?.user?.user_id,
+        data?.user?.usuario_id,
+      ];
+
+      for (const value of nestedCandidates) {
+        const parsed = Number(value);
+        if (Number.isFinite(parsed) && parsed > 0) {
+          return parsed;
+        }
+      }
+    } catch {
+      // nada
+    }
+  }
+
+  return null;
+};
+
 export default function Anticipadas() {
   const [anticipadas, setAnticipadas] = useState<AnticipadaItem[]>([]);
   const [entradasAnticipadas, setEntradasAnticipadas] = useState<
@@ -114,7 +188,7 @@ export default function Anticipadas() {
   const [eventos, setEventos] = useState<EventoOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [optionsLoading, setOptionsLoading] = useState(true);
-  const [cuposLoading, setCuposLoading] = useState(false);
+  const [vendedoresLoading, setVendedoresLoading] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [printingId, setPrintingId] = useState<number | null>(null);
@@ -122,7 +196,7 @@ export default function Anticipadas() {
   const [deleteTarget, setDeleteTarget] = useState<AnticipadaItem | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const [promotorCupos, setPromotorCupos] = useState<PromotorCupo[]>([]);
+  const [vendedores, setVendedores] = useState<VendedorOption[]>([]);
   const [formData, setFormData] = useState({
     nombre: "",
     dni: "",
@@ -138,6 +212,7 @@ export default function Anticipadas() {
       ...prev,
       nombre: "",
       dni: "",
+      promotorId: "",
       cantidad: 1,
       incluyeTrago: false,
     }));
@@ -145,6 +220,7 @@ export default function Anticipadas() {
 
   const fetchAnticipadas = async () => {
     setLoading(true);
+
     try {
       const { data } = await api.get<AnticipadaResponse[]>("/anticipadas");
       const mapped: AnticipadaItem[] = (data ?? []).map(mapAnticipada);
@@ -202,13 +278,6 @@ export default function Anticipadas() {
 
       setEntradasAnticipadas(anticipadasOptions);
 
-      if (!formData.entradaId && anticipadasOptions.length > 0) {
-        setFormData((prev) => ({
-          ...prev,
-          entradaId: String(anticipadasOptions[0].id),
-        }));
-      }
-
       const mappedEventos = eventosData.map((evento: EventoOption) => ({
         id: Number(evento.id),
         nombre: evento.nombre,
@@ -217,18 +286,17 @@ export default function Anticipadas() {
 
       setEventos(mappedEventos);
 
-      if (mappedEventos.length > 0) {
-        const proximoEvento = mappedEventos[0];
-        setFormData((prev) => ({
-          ...prev,
-          eventoId: String(proximoEvento.id),
-        }));
-      } else {
-        setFormData((prev) => ({
-          ...prev,
-          eventoId: "",
-        }));
-      }
+      setFormData((prev) => ({
+        ...prev,
+        entradaId:
+          prev.entradaId ||
+          (anticipadasOptions.length > 0
+            ? String(anticipadasOptions[0].id)
+            : ""),
+        eventoId:
+          prev.eventoId ||
+          (mappedEventos.length > 0 ? String(mappedEventos[0].id) : ""),
+      }));
     } catch (error) {
       console.error("Error cargando opciones de anticipadas:", error);
       toast({
@@ -241,49 +309,72 @@ export default function Anticipadas() {
     }
   };
 
-  const fetchPromotorCupos = async (eventoId: string, entradaId: number) => {
+  const fetchVendedores = async (eventoId: string, entradaId: number) => {
     if (!eventoId || !entradaId) {
-      setPromotorCupos([]);
+      setVendedores([]);
       return;
     }
-    setCuposLoading(true);
+
+    setVendedoresLoading(true);
+
     try {
-      const { data } = await api.get<PromotorCupo[]>("/promotores_cupos", {
+      const { data } = await api.get<VendedorOption[]>("/promotores_cupos", {
         params: {
           evento_id: Number(eventoId),
           entrada_id: entradaId,
         },
       });
-      const cupos = data ?? [];
-      setPromotorCupos(cupos);
+
+      const vendedoresData = Array.isArray(data) ? data : [];
+      setVendedores(vendedoresData);
+
+      const usuarioLogueadoId = getLoggedUserId();
+
       setFormData((prev) => {
-        if (cupos.length === 0) {
+        if (vendedoresData.length === 0) {
           return { ...prev, promotorId: "" };
         }
-        const currentId = Number(prev.promotorId);
-        const exists = cupos.some((cupo) => cupo.usuario_id === currentId);
-        if (!exists) {
-          return { ...prev, promotorId: String(cupos[0].usuario_id) };
+
+        if (
+          usuarioLogueadoId !== null &&
+          vendedoresData.some((v) => v.usuario_id === usuarioLogueadoId)
+        ) {
+          return {
+            ...prev,
+            promotorId: String(usuarioLogueadoId),
+          };
         }
-        return prev;
+
+        const currentId = Number(prev.promotorId);
+        const currentExists = vendedoresData.some(
+          (v) => v.usuario_id === currentId,
+        );
+
+        if (currentExists) {
+          return prev;
+        }
+
+        return {
+          ...prev,
+          promotorId: String(vendedoresData[0].usuario_id),
+        };
       });
     } catch (error) {
-      console.error("Error cargando cupos de promotores:", error);
+      console.error("Error cargando vendedores:", error);
       toast({
         title: "Error",
-        description: "No se pudieron cargar los cupos de promotores.",
+        description: "No se pudieron cargar los vendedores.",
         variant: "destructive",
       });
-      setPromotorCupos([]);
+      setVendedores([]);
     } finally {
-      setCuposLoading(false);
+      setVendedoresLoading(false);
     }
   };
 
   useEffect(() => {
     fetchAnticipadas();
     fetchOptions();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const selectedEntrada = entradasAnticipadas[0] ?? null;
@@ -295,16 +386,18 @@ export default function Anticipadas() {
 
   useEffect(() => {
     if (!formData.eventoId || !selectedEntrada?.id) {
-      setPromotorCupos([]);
+      setVendedores([]);
       return;
     }
-    fetchPromotorCupos(formData.eventoId, selectedEntrada.id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    fetchVendedores(formData.eventoId, selectedEntrada.id);
   }, [formData.eventoId, selectedEntrada?.id]);
 
   const filteredAnticipadas = useMemo(() => {
     const query = search.trim().toLowerCase();
+
     if (!query) return anticipadas;
+
     return anticipadas.filter((item) =>
       `${item.nombre} ${item.dni} ${item.eventoNombre} ${item.entradaNombre}`
         .toLowerCase()
@@ -314,6 +407,7 @@ export default function Anticipadas() {
 
   const handlePrint = async (itemId: number) => {
     setPrintingId(itemId);
+
     try {
       const { data } = await api.post("/anticipadas", {
         accion: "imprimir",
@@ -326,6 +420,7 @@ export default function Anticipadas() {
           : "Ticket enviado a impresión.";
 
       setAnticipadas((prev) => prev.filter((item) => item.id !== itemId));
+
       toast({
         title: "Ticket impreso",
         description: mensaje,
@@ -355,7 +450,7 @@ export default function Anticipadas() {
     if (!formData.eventoId) {
       toast({
         title: "Evento requerido",
-        description: "Seleccioná un evento para validar el cupo del promotor.",
+        description: "Seleccioná un evento para registrar la venta.",
         variant: "destructive",
       });
       return;
@@ -363,16 +458,27 @@ export default function Anticipadas() {
 
     if (!formData.promotorId) {
       toast({
-        title: "Promotor requerido",
-        description: "Seleccioná el promotor que realiza la venta.",
+        title: "Vendedor requerido",
+        description: "Seleccioná el vendedor que realiza la venta.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const usuarioId = getLoggedUserId();
+
+    if (usuarioId === null) {
+      toast({
+        title: "Sesión inválida",
+        description: "No se pudo obtener el usuario logueado.",
         variant: "destructive",
       });
       return;
     }
 
     setCreating(true);
+
     try {
-      const usuarioId = Number(localStorage.getItem("user_id"));
       const { data } = await api.post("/anticipadas", {
         accion: "crear",
         nombre: formData.nombre.trim(),
@@ -388,18 +494,22 @@ export default function Anticipadas() {
 
       if (nueva) {
         setAnticipadas((prev) => [mapAnticipada(nueva), ...prev]);
+
         toast({
           title: "Anticipada registrada",
           description: data?.mensaje ?? "Se agregó al listado.",
         });
+
         resetForm();
         setFormOpen(false);
       }
     } catch (error) {
       console.error("Error al registrar anticipada:", error);
+
       const apiMessage =
         (error as { response?: { data?: { error?: string } } })?.response?.data
           ?.error ?? "Revisá los datos e intentá nuevamente.";
+
       toast({
         title: "No se pudo registrar",
         description: apiMessage,
@@ -412,7 +522,9 @@ export default function Anticipadas() {
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
+
     setDeletingId(deleteTarget.id);
+
     try {
       await api.post("/anticipadas", {
         accion: "eliminar",
@@ -422,10 +534,12 @@ export default function Anticipadas() {
       setAnticipadas((prev) =>
         prev.filter((anticipada) => anticipada.id !== deleteTarget.id),
       );
+
       toast({
         title: "Registro eliminado",
         description: "Se quitó de la lista de anticipadas.",
       });
+
       setDeleteDialogOpen(false);
       setDeleteTarget(null);
     } catch (error) {
@@ -440,8 +554,8 @@ export default function Anticipadas() {
     }
   };
 
-  const selectedPromotor = promotorCupos.find(
-    (promotor) => String(promotor.usuario_id) === formData.promotorId,
+  const selectedVendedor = vendedores.find(
+    (vendedor) => String(vendedor.usuario_id) === formData.promotorId,
   );
 
   return (
@@ -455,12 +569,16 @@ export default function Anticipadas() {
             Gestioná las compras anticipadas y enviá los tickets a impresión.
           </p>
         </div>
+
         <Dialog
           open={formOpen}
           onOpenChange={(isOpen) => {
             setFormOpen(isOpen);
+
             if (!isOpen) {
               resetForm();
+            } else if (formData.eventoId && selectedEntrada?.id) {
+              fetchVendedores(formData.eventoId, selectedEntrada.id);
             }
           }}
         >
@@ -470,12 +588,14 @@ export default function Anticipadas() {
               Registrar
             </Button>
           </DialogTrigger>
+
           <DialogContent className="max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="text-2xl">
                 Registrar anticipada
               </DialogTitle>
             </DialogHeader>
+
             <div className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
@@ -490,6 +610,7 @@ export default function Anticipadas() {
                     className="h-11"
                   />
                 </div>
+
                 <div className="space-y-2">
                   <Label htmlFor="dni">DNI</Label>
                   <Input
@@ -507,6 +628,7 @@ export default function Anticipadas() {
               <div className="grid gap-4 md:grid-cols-3">
                 <div className="space-y-2 md:col-span-2">
                   <Label>Entrada anticipada</Label>
+
                   <div className="rounded-lg border border-border bg-muted/30 px-4 py-3">
                     {optionsLoading ? (
                       <p className="text-sm text-muted-foreground">
@@ -517,6 +639,7 @@ export default function Anticipadas() {
                         <p className="font-semibold text-foreground">
                           {selectedEntrada.nombre}
                         </p>
+
                         {entradaPrice !== null && (
                           <div className="text-xs text-muted-foreground space-y-1">
                             <p>Precio actual: ${entradaPrice}</p>
@@ -536,6 +659,7 @@ export default function Anticipadas() {
                     )}
                   </div>
                 </div>
+
                 <div className="space-y-2">
                   <Label htmlFor="cantidad">Cantidad</Label>
                   <Input
@@ -553,6 +677,7 @@ export default function Anticipadas() {
                   />
                 </div>
               </div>
+
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Evento</Label>
@@ -562,6 +687,7 @@ export default function Anticipadas() {
                       setFormData({
                         ...formData,
                         eventoId: value === "none" ? "" : value,
+                        promotorId: "",
                       })
                     }
                     disabled={optionsLoading}
@@ -569,8 +695,10 @@ export default function Anticipadas() {
                     <SelectTrigger className="h-11">
                       <SelectValue placeholder="Sin evento asignado" />
                     </SelectTrigger>
+
                     <SelectContent>
                       <SelectItem value="none">Sin evento asignado</SelectItem>
+
                       {eventos.map((evento) => (
                         <SelectItem key={evento.id} value={String(evento.id)}>
                           {evento.nombre}
@@ -588,8 +716,9 @@ export default function Anticipadas() {
                     </SelectContent>
                   </Select>
                 </div>
+
                 <div className="space-y-2">
-                  <Label>Promotor</Label>
+                  <Label>Vendedor</Label>
                   <Select
                     value={formData.promotorId}
                     onValueChange={(value) =>
@@ -598,29 +727,34 @@ export default function Anticipadas() {
                         promotorId: value,
                       })
                     }
-                    disabled={cuposLoading || promotorCupos.length === 0}
+                    disabled={vendedoresLoading || vendedores.length === 0}
                   >
                     <SelectTrigger className="h-11">
-                      <SelectValue placeholder="Seleccioná un promotor" />
+                      <SelectValue placeholder="Seleccioná un vendedor" />
                     </SelectTrigger>
+
                     <SelectContent>
-                      {promotorCupos.map((promotor) => (
+                      {vendedores.map((vendedor) => (
                         <SelectItem
-                          key={promotor.usuario_id}
-                          value={String(promotor.usuario_id)}
+                          key={vendedor.usuario_id}
+                          value={String(vendedor.usuario_id)}
                         >
-                          {promotor.usuario_nombre}
+                          {vendedor.usuario_nombre}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                  {selectedPromotor && (
-                    <p className="text-xs text-muted-foreground">
-                      Cupo disponible: {selectedPromotor.cupo_disponible}
-                    </p>
-                  )}
+
+                  {selectedVendedor &&
+                    selectedVendedor.tiene_cupo === true &&
+                    typeof selectedVendedor.cupo_disponible === "number" && (
+                      <p className="text-xs text-muted-foreground">
+                        Cupo disponible: {selectedVendedor.cupo_disponible}
+                      </p>
+                    )}
                 </div>
               </div>
+
               <div className="flex items-center justify-between gap-3 border border-border rounded-lg px-4 py-3">
                 <div>
                   <p className="font-medium">Incluye trago</p>
@@ -628,6 +762,7 @@ export default function Anticipadas() {
                     Agregá el beneficio al ticket impreso.
                   </p>
                 </div>
+
                 <Switch
                   checked={formData.incluyeTrago}
                   onCheckedChange={(checked) =>
@@ -663,6 +798,7 @@ export default function Anticipadas() {
                 Lista de personas con compras anticipadas listas para entregar.
               </p>
             </div>
+
             <div className="relative w-full md:w-72">
               <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
@@ -674,6 +810,7 @@ export default function Anticipadas() {
             </div>
           </CardTitle>
         </CardHeader>
+
         <CardContent>
           {loading ? (
             <div className="flex items-center text-muted-foreground text-sm py-10">
@@ -697,6 +834,7 @@ export default function Anticipadas() {
                     <TableHead className="text-right">Acciones</TableHead>
                   </TableRow>
                 </TableHeader>
+
                 <TableBody>
                   {filteredAnticipadas.map((item) => (
                     <TableRow key={item.id}>
@@ -708,7 +846,9 @@ export default function Anticipadas() {
                           Anticipada registrada
                         </p>
                       </TableCell>
+
                       <TableCell>{item.dni}</TableCell>
+
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <Badge variant="secondary">
@@ -719,10 +859,13 @@ export default function Anticipadas() {
                           )}
                         </div>
                       </TableCell>
+
                       <TableCell className="text-center font-semibold">
                         {item.cantidad}
                       </TableCell>
+
                       <TableCell>{item.eventoNombre}</TableCell>
+
                       <TableCell className="text-right">
                         <div className="flex justify-end gap-2">
                           <Button
@@ -737,6 +880,7 @@ export default function Anticipadas() {
                               <Printer className="h-4 w-4" />
                             )}
                           </Button>
+
                           <Button
                             size="sm"
                             variant="destructive"
@@ -762,6 +906,7 @@ export default function Anticipadas() {
           )}
         </CardContent>
       </Card>
+
       <AlertDialog
         open={deleteDialogOpen}
         onOpenChange={(open) => {
@@ -779,10 +924,12 @@ export default function Anticipadas() {
               permanente.
             </AlertDialogDescription>
           </AlertDialogHeader>
+
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deletingId !== null}>
               Cancelar
             </AlertDialogCancel>
+
             <AlertDialogAction
               onClick={handleDelete}
               disabled={deletingId !== null}
