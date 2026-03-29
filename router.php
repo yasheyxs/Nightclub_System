@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
-header("Access-Control-Allow-Headers: Content-Type");
+header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);
@@ -24,10 +24,21 @@ if ($uriPath === '/api/venta_entradas.php' || $uriPath === '/api/venta_entradas'
     exit;
 }
 
+if ($uriPath === '/api/validar_qr.php' || $uriPath === '/api/validar_qr') {
+    require __DIR__ . '/api/validar_qr.php';
+    exit;
+}
+
+if ($uriPath === '/api/login.php' || $uriPath === '/api/login') {
+    require __DIR__ . '/api/login.php';
+    exit;
+}
+
 // 404 limpio
-header("Content-Type: application/json");
+header("Content-Type: application/json; charset=utf-8");
 http_response_code(404);
 echo json_encode([
+    "ok" => false,
     "error" => "Ruta no encontrada",
     "path" => $uriPath
-]);
+], JSON_UNESCAPED_UNICODE);

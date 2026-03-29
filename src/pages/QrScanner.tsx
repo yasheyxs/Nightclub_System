@@ -11,6 +11,8 @@ interface ValidarQrResponse {
   resultado?: ResultadoQr;
   mensaje?: string;
   entradas_escaneadas?: number;
+  error?: string;
+  details?: string;
 }
 
 function getResultadoConfig(resultado: ResultadoQr | null) {
@@ -102,10 +104,10 @@ export default function QrScanner() {
       lastScanRef.current = { value: codigoNormalizado, at: ahora };
 
       try {
-        const { data } = await api.post<ValidarQrResponse>("/validar_qr", {
+        const { data } = await api.post("/validar_qr.php", {
           qr_codigo: codigoNormalizado,
           usuario_validador_id: user?.id ?? null,
-          dispositivo: navigator.userAgent,
+          dispositivo: "scanner-web",
         });
 
         const nextResultado =
@@ -125,14 +127,24 @@ export default function QrScanner() {
           error !== null &&
           "response" in error &&
           typeof (error as { response?: unknown }).response === "object"
-            ? ((error as { response?: { data?: ValidarQrResponse } }).response
-                ?.data ?? null)
+            ? ((
+                error as {
+                  response?: { data?: ValidarQrResponse };
+                }
+              ).response?.data ?? null)
             : null;
+
+        console.error("VALIDAR_QR_ERROR:", responseData);
 
         const nextResultado = responseData?.resultado ?? "invalido";
 
         setResultado(nextResultado);
-        setMensaje(responseData?.mensaje ?? "No se pudo validar el QR.");
+        setMensaje(
+          responseData?.mensaje ??
+            responseData?.details ??
+            responseData?.error ??
+            "No se pudo validar el QR.",
+        );
 
         if (typeof responseData?.entradas_escaneadas === "number") {
           setEntradasEscaneadas(responseData.entradas_escaneadas);

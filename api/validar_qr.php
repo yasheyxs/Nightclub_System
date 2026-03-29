@@ -146,16 +146,24 @@ try {
     $input = getJsonInput();
 
     $qrCodigo = isset($input['qr_codigo']) ? trim((string)$input['qr_codigo']) : '';
-    $usuarioValidadorId = isset($input['usuario_validador_id']) ? (int)$input['usuario_validador_id'] : null;
+    $usuarioValidadorId = isset($input['usuario_validador_id']) && $input['usuario_validador_id'] !== null
+        ? (int)$input['usuario_validador_id']
+        : null;
+
     $dispositivo = isset($input['dispositivo']) ? trim((string)$input['dispositivo']) : null;
     $observaciones = isset($input['observaciones']) ? trim((string)$input['observaciones']) : null;
     $ip = getClientIp();
 
-    if ($qrCodigo === '') {
-        jsonResponse(400, [
-            'ok' => false,
-            'error' => 'El campo qr_codigo es obligatorio.'
-        ]);
+    if ($dispositivo !== null && $dispositivo !== '') {
+        $dispositivo = mb_substr($dispositivo, 0, 100);
+    } else {
+        $dispositivo = null;
+    }
+
+    if ($ip !== null && $ip !== '') {
+        $ip = mb_substr($ip, 0, 100);
+    } else {
+        $ip = null;
     }
 
     $stmt = $pdo->prepare("
@@ -335,13 +343,15 @@ try {
         ]
     ]);
 } catch (PDOException $e) {
+
     if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
         $pdo->rollBack();
     }
 
     jsonResponse(500, [
         'ok' => false,
-        'error' => $e->getMessage()
+        'error' => 'Error SQL',
+        'details' => $e->getMessage()
     ]);
 } catch (Throwable $e) {
     if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
