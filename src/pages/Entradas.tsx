@@ -22,15 +22,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Card } from "@/components/ui/card";
-
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
-
 import { api } from "@/services/api";
-import axios, { AxiosError } from "axios";
+import axios from "axios";
 
 interface EventOption {
   id: number;
@@ -63,15 +60,51 @@ interface VentaEntradasResponse {
     nombre: string;
     precio_base: number;
   }[];
-  ventas: VentaResumen[];
+  ventas?: VentaResumen[];
+}
+
+interface PrintJob {
+  ticket_id: number;
+  evento_id: number;
+  entrada_id: number;
+  usuario_id: number | null;
+  tipo: string;
+  precio: number;
+  precio_formateado: string;
+  incluye_trago: boolean;
+  trago_texto: string;
+  qr: string;
+  estado: string;
+  fecha: string;
+  hora: string;
+  negocio: string;
+  ancho_papel: string;
+}
+
+interface RegistrarVentaResponse {
+  ok: boolean;
+  tickets?: Array<{ id: number }>;
+  print_jobs?: PrintJob[];
+  mensaje?: string;
+  error?: string;
+}
+
+interface AnularEntradaResponse {
+  ok?: boolean;
+  tickets?: Array<{ id: number }>;
+  mensaje?: string;
+  error?: string;
 }
 
 type StatCounterVariant = "primary" | "accent" | "success" | "default";
-
 type VentasPorEvento = Record<string, Record<number, number>>;
+
+const PRINTER_URL =
+  localStorage.getItem("printer_url") || "http://localhost:3001/print";
 
 export default function Entradas() {
   const { toast } = useToast();
+
   const [selectedEvent, setSelectedEvent] = useState<string>("");
   const [events, setEvents] = useState<EventOption[]>([]);
   const [entradas, setEntradas] = useState<EntradaOption[]>([]);
@@ -105,6 +138,7 @@ export default function Entradas() {
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
+
       try {
         const { data } =
           await api.get<VentaEntradasResponse>("/venta_entradas");
@@ -157,12 +191,14 @@ export default function Entradas() {
         );
 
         const ventasMap: VentasPorEvento = {};
-        data.ventas.forEach((venta) => {
+        (data.ventas ?? []).forEach((venta) => {
           const eventKey =
             venta.evento_id !== null ? String(venta.evento_id) : "sin_evento";
+
           if (!ventasMap[eventKey]) {
             ventasMap[eventKey] = {};
           }
+
           ventasMap[eventKey][venta.entrada_id] = Number(
             venta.total_vendido ?? 0,
           );
@@ -193,6 +229,7 @@ export default function Entradas() {
   const selectedEventData = events.find(
     (event) => String(event.id) === selectedEvent,
   );
+
   const currentSales = selectedEvent
     ? (ventasPorEvento[selectedEvent] ?? {})
     : {};
@@ -205,10 +242,12 @@ export default function Entradas() {
   const maxCapacity = selectedEventData?.capacity ?? 0;
   const capacidadPorcentaje =
     maxCapacity > 0 ? Math.round((totalEntradas / maxCapacity) * 100) : null;
+
   const totalRecaudado = entradas.reduce((acc, entrada) => {
     const cantidad = currentSales[entrada.id] ?? 0;
     return acc + cantidad * entrada.precio_base;
   }, 0);
+
   const variants: StatCounterVariant[] = ["primary", "accent", "success"];
 
   const handleCloseEvent = () => {
@@ -219,6 +258,7 @@ export default function Entradas() {
       });
       return;
     }
+
     setShowSummary(true);
   };
 
@@ -246,19 +286,25 @@ export default function Entradas() {
             data?.mensaje ??
             "Se guardó el resumen y se reiniciaron los contadores.",
         });
+
         const closedId = Number(selectedEvent);
+
         setVentasPorEvento((prev) => {
           const updated = { ...prev };
           delete updated[selectedEvent];
           return updated;
         });
+
         setEvents((prev) => {
           const filtered = prev.filter((event) => event.id !== closedId);
+
           if (!filtered.some((event) => String(event.id) === selectedEvent)) {
             setSelectedEvent(filtered.length > 0 ? String(filtered[0].id) : "");
           }
+
           return filtered;
         });
+
         setShowSummary(false);
       })
       .catch((error) => {
@@ -323,12 +369,47 @@ export default function Entradas() {
     setTipoOperacion("venta");
   };
 
+  const enviarATicketera = async (printJobs: PrintJob[] = []) => {
+    if (!printJobs.length) {
+      return;
+    }
+
+    const response = await fetch(PRINTER_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ tickets: printJobs }),
+    });
+
+    let responseData: unknown = null;
+
+    try {
+      responseData = await response.json();
+    } catch {
+      responseData = null;
+    }
+
+    if (!response.ok) {
+      const message =
+        typeof responseData === "object" &&
+        responseData !== null &&
+        "error" in responseData &&
+        typeof responseData.error === "string"
+          ? responseData.error
+          : "No se pudo imprimir en la ticketera.";
+
+      throw new Error(message);
+    }
+  };
+
   const registrarVenta = async () => {
     const usuarioId = Number(
       localStorage.getItem("usuario_id") ||
         localStorage.getItem("user_id") ||
         localStorage.getItem("id"),
     );
+
     if (!selectedEvent || sellingEntradaId === null) {
       toast({
         title: "Datos incompletos",
@@ -349,6 +430,7 @@ export default function Entradas() {
     }
 
     const entrada = entradas.find((item) => item.id === sellingEntradaId);
+
     if (!entrada) {
       toast({
         title: "Entrada no encontrada",
@@ -382,8 +464,15 @@ export default function Entradas() {
           usuario_id: usuarioId,
         };
 
-        const { data } = await api.post("/venta_entradas", payload);
+        const { data } = await api.post<RegistrarVentaResponse>(
+          "/venta_entradas",
+          payload,
+        );
+
         const cantidadRegistrada = data?.tickets?.length ?? cantidadVenta;
+        const printJobs = data?.print_jobs ?? [];
+
+        await enviarATicketera(printJobs);
 
         const eventKey = String(selectedEvent);
         const entradaKey = sellingEntradaId;
@@ -416,8 +505,8 @@ export default function Entradas() {
         });
 
         toast({
-          title: "Impresión automática",
-          description: `Se imprimieron ${cantidadRegistrada} tickets`,
+          title: "Impresión enviada",
+          description: `Se enviaron ${cantidadRegistrada} tickets a la ticketera.`,
         });
       } else {
         const payload = {
@@ -427,7 +516,11 @@ export default function Entradas() {
           motivo: "Ajuste manual desde panel",
         };
 
-        const { data } = await api.post("/anular_entrada", payload);
+        const { data } = await api.post<AnularEntradaResponse>(
+          "/anular_entrada",
+          payload,
+        );
+
         const cantidadAnulada = data?.tickets?.length ?? cantidadVenta;
 
         const eventKey = String(selectedEvent);
@@ -499,6 +592,8 @@ export default function Entradas() {
         ) {
           backendMessage = responseData;
         }
+      } else if (error instanceof Error && error.message.trim() !== "") {
+        backendMessage = error.message;
       }
 
       toast({
@@ -515,11 +610,14 @@ export default function Entradas() {
   };
 
   const ventaAbierta = sellingEntradaId !== null;
+
   const entradaSeleccionada = entradas.find(
     (item) => item.id === sellingEntradaId,
   );
+
   const maxRestante =
     sellingEntradaId !== null ? (currentSales[sellingEntradaId] ?? 0) : 0;
+
   const totalOperacion = entradaSeleccionada
     ? entradaSeleccionada.precio_base * cantidadVenta
     : 0;
@@ -542,6 +640,7 @@ export default function Entradas() {
           <Calendar className="text-primary" />
           <span className="font-medium text-foreground">Evento:</span>
         </div>
+
         <Select
           value={selectedEvent}
           onValueChange={(value) => setSelectedEvent(value)}
@@ -549,6 +648,7 @@ export default function Entradas() {
           <SelectTrigger className="w-[260px]">
             <SelectValue placeholder="Seleccionar evento" />
           </SelectTrigger>
+
           <SelectContent>
             {events.map((event) => (
               <SelectItem key={event.id} value={String(event.id)}>
@@ -562,7 +662,8 @@ export default function Entradas() {
       <div className="bg-card border border-border rounded-lg p-6 mb-6">
         {loading ? (
           <div className="flex items-center text-muted-foreground text-sm">
-            <Loader2 className="h-4 w-4 animate-spin mr-2" /> Cargando...
+            <Loader2 className="h-4 w-4 animate-spin mr-2" />
+            Cargando...
           </div>
         ) : selectedEvent ? (
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -570,19 +671,24 @@ export default function Entradas() {
               <p className="text-sm text-muted-foreground uppercase tracking-wide">
                 Ventas Totales
               </p>
+
               <p className="text-5xl font-bold text-primary">
                 {numberFormatter.format(totalEntradas)}
               </p>
+
               <div className="mt-2 flex items-center gap-2 text-sm text-muted-foreground">
                 <Ticket className="h-4 w-4" />
                 Entradas vendidas para {selectedEventData?.name ?? "el evento"}
               </div>
             </div>
+
             <div className="text-left md:text-right">
               <p className="text-sm text-muted-foreground">Capacidad Máxima</p>
+
               <p className="text-2xl font-semibold text-foreground">
                 {maxCapacity > 0 ? numberFormatter.format(maxCapacity) : "—"}
               </p>
+
               {capacidadPorcentaje !== null && (
                 <p className="text-sm text-muted-foreground mt-1">
                   Ocupación:{" "}
@@ -591,6 +697,7 @@ export default function Entradas() {
                   </span>
                 </p>
               )}
+
               <div className="mt-2">
                 <div className="w-full md:w-48 h-3 bg-muted rounded-full overflow-hidden">
                   <div
@@ -606,6 +713,7 @@ export default function Entradas() {
                   />
                 </div>
               </div>
+
               <div className="mt-3 text-sm text-muted-foreground">
                 Total recaudado:{" "}
                 <span className="font-semibold text-foreground">
@@ -663,40 +771,50 @@ export default function Entradas() {
             <p>
               <strong>Evento:</strong> {selectedEventData?.name}
             </p>
+
             <p>
               <strong>Total vendidas:</strong>{" "}
               {numberFormatter.format(totalEntradas)}
             </p>
+
             <p>
               <strong>Total recaudado:</strong>{" "}
               {currencyFormatter.format(totalRecaudado)}
             </p>
+
             {capacidadPorcentaje !== null && (
               <p>
                 <strong>Ocupación:</strong> {capacidadPorcentaje}%
               </p>
             )}
+
             <div className="pt-2 space-y-1">
               <p className="font-semibold text-foreground">
                 Detalle por entrada:
               </p>
+
               {entradas.map((entrada) => {
                 const cantidad = currentSales[entrada.id] ?? 0;
+
                 if (!cantidad) {
                   return null;
                 }
+
                 const totalEntrada = cantidad * entrada.precio_base;
+
                 return (
                   <div
                     key={entrada.id}
                     className="flex items-center justify-between"
                   >
                     <span>{entrada.nombre}</span>
+
                     <div className="text-right">
                       <span className="block">
                         {numberFormatter.format(cantidad)}{" "}
                         {cantidad === 1 ? "entrada" : "entradas"}
                       </span>
+
                       <span className="text-xs text-muted-foreground">
                         {currencyFormatter.format(totalEntrada)}
                       </span>
@@ -711,6 +829,7 @@ export default function Entradas() {
             <Button variant="outline" onClick={() => setShowSummary(false)}>
               Cancelar
             </Button>
+
             <Button
               onClick={handleConfirmClose}
               className="bg-[#0f5132] text-white hover:bg-[#0c452a]"
@@ -718,7 +837,8 @@ export default function Entradas() {
             >
               {closingEvent ? (
                 <>
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" /> Guardando...
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Guardando...
                 </>
               ) : (
                 "Confirmar Cierre"
@@ -744,11 +864,13 @@ export default function Entradas() {
                 : "Registrar venta"}
             </DialogTitle>
           </DialogHeader>
+
           <div className="space-y-4 mt-2">
             <div>
               <p className="text-sm text-muted-foreground">
                 Evento seleccionado
               </p>
+
               <p className="font-semibold text-foreground">
                 {selectedEventData?.name ?? "Sin evento"}
               </p>
@@ -756,9 +878,11 @@ export default function Entradas() {
 
             <div>
               <p className="text-sm text-muted-foreground">Tipo de entrada</p>
+
               <p className="font-semibold text-foreground">
                 {entradaSeleccionada?.nombre ?? "Sin selección"}
               </p>
+
               {entradaSeleccionada && (
                 <p className="text-sm text-muted-foreground">
                   Precio base:{" "}
@@ -771,6 +895,7 @@ export default function Entradas() {
               <Label htmlFor="cantidad">
                 Cantidad {tipoOperacion === "resta" ? "a restar" : "a vender"}
               </Label>
+
               <Input
                 id="cantidad"
                 type="number"
@@ -783,27 +908,32 @@ export default function Entradas() {
                 value={cantidadVenta}
                 onChange={(event) => {
                   const value = Number(event.target.value);
+
                   if (Number.isNaN(value)) {
                     setCantidadVenta(1);
+                    return;
+                  }
+
+                  const baseValue = value <= 0 ? 1 : Math.floor(value);
+
+                  if (tipoOperacion === "resta") {
+                    const limite = Math.max(maxRestante, 1);
+                    setCantidadVenta(
+                      limite > 0 ? Math.min(baseValue, limite) : 1,
+                    );
                   } else {
-                    const baseValue = value <= 0 ? 1 : Math.floor(value);
-                    if (tipoOperacion === "resta") {
-                      const limite = Math.max(maxRestante, 1);
-                      setCantidadVenta(
-                        limite > 0 ? Math.min(baseValue, limite) : 1,
-                      );
-                    } else {
-                      setCantidadVenta(baseValue);
-                    }
+                    setCantidadVenta(baseValue);
                   }
                 }}
               />
             </div>
+
             {tipoOperacion === "resta" && (
               <p className="text-xs text-muted-foreground">
                 Disponibles para restar: {numberFormatter.format(maxRestante)}
               </p>
             )}
+
             {tipoOperacion === "venta" && (
               <div className="flex items-center space-x-2">
                 <Checkbox
@@ -813,6 +943,7 @@ export default function Entradas() {
                     setIncluyeTrago(Boolean(checked))
                   }
                 />
+
                 <Label htmlFor="incluye-trago">Incluye trago gratis</Label>
               </div>
             )}
@@ -839,6 +970,7 @@ export default function Entradas() {
             >
               Cancelar
             </Button>
+
             <Button
               onClick={registrarVenta}
               disabled={
@@ -848,18 +980,20 @@ export default function Entradas() {
             >
               {registrandoVenta ? (
                 <>
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />{" "}
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
                   Registrando...
                 </>
               ) : (
                 <>
                   {tipoOperacion === "resta" ? (
                     <>
-                      <MinusCircle className="h-4 w-4 mr-2" /> Restar
+                      <MinusCircle className="h-4 w-4 mr-2" />
+                      Restar
                     </>
                   ) : (
                     <>
-                      <Ticket className="h-4 w-4 mr-2" /> Imprimir
+                      <Ticket className="h-4 w-4 mr-2" />
+                      Imprimir
                     </>
                   )}
                 </>

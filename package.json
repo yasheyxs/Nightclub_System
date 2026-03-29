@@ -46,6 +46,9 @@
     "cmdk": "^1.1.1",
     "date-fns": "^3.6.0",
     "embla-carousel-react": "^8.6.0",
+    "escpos": "^3.0.0-alpha.6",
+    "escpos-network": "^3.0.0-alpha.5",
+    "escpos-usb": "^3.0.0-alpha.4",
     "express": "^5.2.1",
     "input-otp": "^1.4.2",
     "lucide-react": "^0.462.0",
@@ -84,5 +87,18 @@
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.38.0",
     "vite": "^7.2.6"
-  }
+  },
+  "description": "Sistema backend diseñado para la gestión integral de un nightclub, orientado a la operación diaria, control de ventas y generación de reportes. Está pensado para entornos reales de uso nocturno, con foco en estabilidad, automatización y consistencia de datos.",
+  "main": "eslint.config.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yasheyxs/Santas_System.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/yasheyxs/Santas_System/issues"
+  },
+  "homepage": "https://github.com/yasheyxs/Santas_System#readme"
 }

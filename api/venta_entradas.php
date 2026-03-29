@@ -15,7 +15,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 date_default_timezone_set('America/Argentina/Cordoba');
 
 // ======================================
-// CONFIG DB (dejé lo tuyo igual)
+// CONFIG DB
 // ======================================
 $host = "aws-1-us-east-2.pooler.supabase.com";
 $port = "5432";
@@ -35,18 +35,14 @@ function jsonResponse(int $status, array $data): void
 
 function getJsonInput(): array
 {
-    $data = json_decode(file_get_contents('php://input') ?: '', true);
+    $raw = file_get_contents('php://input') ?: '';
+    $data = json_decode($raw, true);
     return is_array($data) ? $data : [];
 }
 
 function normalizeBool($v): bool
 {
     return in_array(strtolower((string)$v), ['1', 'true', 'si', 'yes', 'on'], true);
-}
-
-function escapeHtml(string $v): string
-{
-    return htmlspecialchars($v, ENT_QUOTES, 'UTF-8');
 }
 
 function generarQrCodigo(): string
@@ -59,118 +55,6 @@ function generarQrHash(string $qr): string
     return hash('sha256', $qr);
 }
 
-// ======================================
-// QR GENERADOR (SIN LIBRERÍAS PESADAS)
-// ======================================
-function generarQrBase64(string $qr): array
-{
-    // 1. Tiny QR (si existe archivo)
-    if (file_exists(__DIR__ . '/TinyQRCode.php')) {
-        try {
-            require_once __DIR__ . '/TinyQRCode.php';
-
-            // Si por alguna razón el archivo no define la clase, creamos un fallback
-            // ligero que utiliza la API externa para generar la imagen PNG.
-            if (!class_exists('TinyQRCode')) {
-                final class TinyQRCode
-                {
-                    public static function png(string $data, $outfile = null, string $level = 'L', int $size = 5, int $margin = 2)
-                    {
-                        $url = "https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=" . urlencode($data);
-                        $img = @file_get_contents($url);
-                        return $img ?: '';
-                    }
-                }
-            }
-
-            if (class_exists('TinyQRCode')) {
-                $img = TinyQRCode::png($qr, null, 'L', 5, 2);
-                return [
-                    'ok' => true,
-                    'base64' => base64_encode($img),
-                    'source' => 'tiny'
-                ];
-            }
-        } catch (Throwable $e) {
-            // seguimos fallback
-        }
-    }
-
-    // 2. API externa
-    try {
-        $url = "https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=" . urlencode($qr);
-        $img = @file_get_contents($url);
-
-        if ($img !== false) {
-            return [
-                'ok' => true,
-                'base64' => base64_encode($img),
-                'source' => 'api'
-            ];
-        }
-    } catch (Throwable $e) {
-    }
-
-    // 3. fallback texto
-    return [
-        'ok' => false,
-        'base64' => null,
-        'source' => 'text'
-    ];
-}
-
-// ======================================
-// HTML TICKET
-// ======================================
-function generarHtmlTicket(array $data): string
-{
-    $qrData = generarQrBase64($data['qr']);
-
-    $qrHtml = '';
-
-    if ($qrData['ok']) {
-        $qrHtml = '<img src="data:image/png;base64,' . $qrData['base64'] . '" />';
-    } else {
-        $qrHtml = '<div class="qr-fallback">' . escapeHtml($data['qr']) . '</div>';
-    }
-
-    return <<<HTML
-<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<style>
-body { font-family: Arial; width: 80mm; text-align:center; }
-.title { font-size:22px; font-weight:bold; }
-.qr img { width:220px; }
-.qr-fallback { font-size:12px; word-break:break-all; border:1px dashed #000; padding:10px; }
-</style>
-</head>
-<body>
-
-<div class="title">SANTAS</div>
-
-<div>Entrada: {$data['tipo']}</div>
-<div>Total: \${$data['precio']}</div>
-
-{$data['trago']}
-
-<div class="qr">$qrHtml</div>
-
-<div>{$data['qr']}</div>
-
-<script>
-window.onload = () => window.print();
-</script>
-
-</body>
-</html>
-HTML;
-}
-
-// ======================================
-// DB
-// ======================================
 function db(): PDO
 {
     global $host, $port, $dbname, $user, $password;
@@ -183,89 +67,165 @@ function db(): PDO
     return $pdo;
 }
 
+function obtenerTextoTrago(bool $incluyeTrago): string
+{
+    return $incluyeTrago ? 'INCLUYE TRAGO GRATIS' : '';
+}
+
 // ======================================
 // MAIN
 // ======================================
 try {
-
     $pdo = db();
 
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         jsonResponse(200, [
-            'eventos' => $pdo->query("SELECT * FROM eventos")->fetchAll(),
-            'entradas' => $pdo->query("SELECT * FROM entradas")->fetchAll()
+            'eventos' => $pdo->query("SELECT * FROM eventos")->fetchAll(PDO::FETCH_ASSOC),
+            'entradas' => $pdo->query("SELECT * FROM entradas")->fetchAll(PDO::FETCH_ASSOC),
+            'ventas' => $pdo->query("
+                SELECT evento_id, entrada_id, SUM(cantidad) AS total_vendido
+                FROM ventas_entradas
+                WHERE estado = 'comprada'
+                GROUP BY evento_id, entrada_id
+            ")->fetchAll(PDO::FETCH_ASSOC),
         ]);
     }
 
     $input = getJsonInput();
 
+    $accion = strtolower(trim((string)($input['accion'] ?? 'sumar')));
+
+    if ($accion === 'cerrar_evento') {
+        $eventoId = (int)($input['evento_id'] ?? 0);
+
+        if ($eventoId <= 0) {
+            jsonResponse(400, [
+                'ok' => false,
+                'error' => 'Evento inválido',
+            ]);
+        }
+
+        jsonResponse(200, [
+            'ok' => true,
+            'mensaje' => 'Evento cerrado correctamente',
+        ]);
+    }
+
     $entradaId = (int)($input['entrada_id'] ?? 0);
     $cantidad = (int)($input['cantidad'] ?? 1);
     $eventoId = (int)($input['evento_id'] ?? 0);
     $trago = normalizeBool($input['incluye_trago'] ?? false);
+    $usuarioId = (int)($input['usuario_id'] ?? 0);
 
-    if (!$entradaId || !$eventoId) {
-        jsonResponse(400, ['error' => 'Datos inválidos']);
+    if ($entradaId <= 0 || $eventoId <= 0 || $cantidad <= 0) {
+        jsonResponse(400, [
+            'ok' => false,
+            'error' => 'Datos inválidos',
+        ]);
     }
 
-    $entrada = $pdo->query("SELECT * FROM entradas WHERE id = $entradaId")->fetch();
+    $stmtEntrada = $pdo->prepare("
+        SELECT id, nombre, precio_base
+        FROM entradas
+        WHERE id = :id
+        LIMIT 1
+    ");
+    $stmtEntrada->execute([':id' => $entradaId]);
+    $entrada = $stmtEntrada->fetch(PDO::FETCH_ASSOC);
 
     if (!$entrada) {
-        jsonResponse(404, ['error' => 'Entrada no encontrada']);
+        jsonResponse(404, [
+            'ok' => false,
+            'error' => 'Entrada no encontrada',
+        ]);
     }
 
+    $precioBase = (float)$entrada['precio_base'];
+
     $tickets = [];
-    $htmls = [];
+    $printJobs = [];
     $warnings = [];
 
     for ($i = 0; $i < $cantidad; $i++) {
-
         $qr = generarQrCodigo();
         $hash = generarQrHash($qr);
 
-        $stmt = $pdo->prepare("
+        $sql = "
             INSERT INTO ventas_entradas
-            (entrada_id, cantidad, precio_unitario, evento_id, estado, qr_codigo, qr_hash)
-            VALUES (:e,1,:p,:ev,'comprada',:qr,:h)
+                (
+                    entrada_id,
+                    cantidad,
+                    precio_unitario,
+                    evento_id,
+                    estado,
+                    incluye_trago,
+                    qr_codigo,
+                    qr_hash
+                )
+            VALUES
+                (
+                    :entrada_id,
+                    1,
+                    :precio_unitario,
+                    :evento_id,
+                    'comprada',
+                    :incluye_trago,
+                    :qr_codigo,
+                    :qr_hash
+                )
             RETURNING *
-        ");
+        ";
 
-        $stmt->execute([
-            ':e' => $entradaId,
-            ':p' => $entrada['precio_base'],
-            ':ev' => $eventoId,
-            ':qr' => $qr,
-            ':h' => $hash
-        ]);
+        $params = [
+            ':entrada_id'     => $entradaId,
+            ':precio_unitario' => $precioBase,
+            ':evento_id'      => $eventoId,
+            ':incluye_trago'  => $trago ? true : false,
+            ':qr_codigo'      => $qr,
+            ':qr_hash'        => $hash,
+        ];
 
-        $ticket = $stmt->fetch();
+        $stmt = $pdo->prepare($sql);
+        $stmt->bindValue(':entrada_id', $params[':entrada_id'], PDO::PARAM_INT);
+        $stmt->bindValue(':precio_unitario', $params[':precio_unitario']);
+        $stmt->bindValue(':evento_id', $params[':evento_id'], PDO::PARAM_INT);
+        $stmt->bindValue(':incluye_trago', $params[':incluye_trago'], PDO::PARAM_BOOL);
+        $stmt->bindValue(':qr_codigo', $params[':qr_codigo'], PDO::PARAM_STR);
+        $stmt->bindValue(':qr_hash', $params[':qr_hash'], PDO::PARAM_STR);
+        $stmt->execute();
 
+        $ticket = $stmt->fetch(PDO::FETCH_ASSOC);
         $tickets[] = $ticket;
 
-        $html = generarHtmlTicket([
-            'tipo' => escapeHtml($entrada['nombre']),
-            'precio' => number_format($entrada['precio_base'], 0, ',', '.'),
-            'trago' => $trago ? '<div>INCLUYE TRAGO GRATIS</div>' : '',
-            'qr' => $qr
-        ]);
-
-        $htmls[] = [
-            'ticket_id' => $ticket['id'],
-            'html' => $html
+        $printJobs[] = [
+            'ticket_id'       => (int)($ticket['id'] ?? 0),
+            'evento_id'       => $eventoId,
+            'entrada_id'      => $entradaId,
+            'usuario_id'      => $usuarioId > 0 ? $usuarioId : null,
+            'tipo'            => (string)$entrada['nombre'],
+            'precio'          => (int)round($precioBase),
+            'precio_formateado' => number_format($precioBase, 0, ',', '.'),
+            'incluye_trago'   => $trago,
+            'trago_texto'     => obtenerTextoTrago($trago),
+            'qr'              => $qr,
+            'estado'          => 'comprada',
+            'fecha'           => date('d/m/Y'),
+            'hora'            => date('H:i'),
+            'negocio'         => 'SANTAS',
+            'ancho_papel'     => '80mm',
         ];
     }
 
     jsonResponse(200, [
-        'ok' => true,
-        'tickets' => $tickets,
-        'html_tickets' => $htmls,
-        'warnings' => $warnings
+        'ok'         => true,
+        'tickets'    => $tickets,
+        'print_jobs' => $printJobs,
+        'warnings'   => $warnings,
     ]);
 } catch (Throwable $e) {
-
     jsonResponse(500, [
-        'ok' => false,
-        'error' => $e->getMessage(),
-        'recovery' => 'Podés reintentar la operación'
+        'ok'       => false,
+        'error'    => $e->getMessage(),
+        'recovery' => 'Podés reintentar la operación',
     ]);
 }
