@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/db.php';
+
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: GET, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
@@ -274,12 +276,6 @@ function sendPdfExport(
     exit;
 }
 
-$host = "aws-1-us-east-2.pooler.supabase.com";
-$port = "5432";
-$dbname = "postgres";
-$user = "postgres.kxvogvgsgwfvtmidabyp";
-$password = "lapicero30!";
-
 try {
     $globalStart = microtime(true);
 
@@ -288,17 +284,13 @@ try {
     }
 
     $timer = microtime(true);
-    $pdo = new PDO(
-        "pgsql:host=$host;port=$port;dbname=$dbname;user=$user;password=$password;sslmode=require"
-    );
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-    logTime('PDO connect', $timer);
+    $pdo = getPdo();
+    logTime('PDO connect/reuse', $timer);
 
-    $dayParam   = $_GET['day'] ?? null;
+    $dayParam = $_GET['day'] ?? null;
     $monthParam = $_GET['month'] ?? null;
-    $limitUp    = isset($_GET['limitUpcoming']) ? max(1, (int)$_GET['limitUpcoming']) : 3;
-    $export     = $_GET['export'] ?? null;
+    $limitUp = isset($_GET['limitUpcoming']) ? max(1, (int)$_GET['limitUpcoming']) : 3;
+    $export = $_GET['export'] ?? null;
 
     if ($monthParam !== null && preg_match('/^\d{4}-\d{2}$/', $monthParam) === 1) {
         [$year, $month] = explode('-', $monthParam);
@@ -322,16 +314,6 @@ try {
         $dayEnd = date('Y-m-d H:i:s', strtotime($dayStart . ' +1 day'));
     }
 
-    /*
-     |------------------------------------------------------------
-     | 1) Base mensual única
-     |------------------------------------------------------------
-     | De acá salen:
-     | - metrics
-     | - pastEvents
-     | - calendarEvents
-     | - monthlySummary
-     */
     $timer = microtime(true);
     $baseMonthlySql = "
         SELECT
@@ -471,11 +453,6 @@ try {
     ];
     logTime('base mensual armado PHP', $timer);
 
-    /*
-     |------------------------------------------------------------
-     | 2) Entradas escaneadas del mes
-     |------------------------------------------------------------
-     */
     $timer = microtime(true);
     $scannedSql = "
         SELECT COUNT(a.id) AS entradas_escaneadas
@@ -497,11 +474,6 @@ try {
     $metrics['entradasEscaneadas'] = (int)($scannedRow['entradas_escaneadas'] ?? 0);
     logTime('escaneadas', $timer);
 
-    /*
-     |------------------------------------------------------------
-     | 3) Evento en curso
-     |------------------------------------------------------------
-     */
     $timer = microtime(true);
     $currentSql = "
         SELECT
@@ -546,11 +518,6 @@ try {
     ] : null;
     logTime('currentNight', $timer);
 
-    /*
-     |------------------------------------------------------------
-     | 4) Próximos eventos
-     |------------------------------------------------------------
-     */
     $timer = microtime(true);
     $upcomingSql = "
         SELECT
@@ -589,11 +556,6 @@ try {
     );
     logTime('upcoming', $timer);
 
-    /*
-     |------------------------------------------------------------
-     | 5) Ventas + asistencia semanal en una sola query
-     |------------------------------------------------------------
-     */
     $timer = microtime(true);
     $weeklySql = "
         SELECT
@@ -630,11 +592,6 @@ try {
     }
     logTime('weekly sales+attendance', $timer);
 
-    /*
-     |------------------------------------------------------------
-     | 6) Actividad reciente
-     |------------------------------------------------------------
-     */
     $timer = microtime(true);
     $recentSql = "
         SELECT
@@ -659,11 +616,6 @@ try {
     }
     logTime('recent', $timer);
 
-    /*
-     |------------------------------------------------------------
-     | 7) Distribución por evento en una sola query
-     |------------------------------------------------------------
-     */
     $timer = microtime(true);
     $categorySql = "
         WITH totals AS (
@@ -746,6 +698,7 @@ try {
     sendJson(200, $response);
 } catch (Throwable $e) {
     error_log('dashboard.php ERROR: ' . $e->getMessage());
+
     sendJson(500, [
         'error' => true,
         'message' => 'Error interno del servidor',
