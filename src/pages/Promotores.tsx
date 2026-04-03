@@ -72,7 +72,7 @@ export default function Promotores() {
     try {
       const [entradasRes, eventosRes] = await Promise.all([
         api.get("/entradas"),
-        api.get("/eventos?upcoming=1"),
+        api.get("/eventos"),
       ]);
 
       const entradasData = Array.isArray(entradasRes.data)

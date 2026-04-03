@@ -53,7 +53,13 @@ try {
         $consultaExistente = $pdo->prepare("
             SELECT id, nombre, detalle, fecha, capacidad, activo
             FROM eventos
-            WHERE fecha::date = :fecha::date AND activo = true
+            WHERE CAST(fecha AS date) = :fecha
+            AND activo = true
+            AND NOT EXISTS (
+                SELECT 1
+                FROM cierres_eventos ce
+                WHERE ce.evento_id = eventos.id
+            )
             ORDER BY fecha ASC
             LIMIT 1
         ");
