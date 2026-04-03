@@ -2,122 +2,71 @@
 
 declare(strict_types=1);
 
-ini_set('display_errors', '1');
-error_reporting(E_ALL);
+require_once __DIR__ . '/db.php';
 
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: POST, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
 header("Content-Type: application/json; charset=utf-8");
 
+ini_set('display_errors', '0');
+error_reporting(0);
+
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);
     exit;
 }
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    http_response_code(405);
-    echo json_encode([
-        'ok' => false,
-        'error' => 'Método no permitido'
-    ], JSON_UNESCAPED_UNICODE);
+date_default_timezone_set('America/Argentina/Cordoba');
+
+function logTime(string $label, float $start): void
+{
+    error_log($label . ': ' . round((microtime(true) - $start) * 1000, 2) . ' ms');
+}
+
+function jsonResponse(int $status, array $data): void
+{
+    http_response_code($status);
+    echo json_encode($data, JSON_UNESCAPED_UNICODE);
     exit;
 }
 
-$envFilePath = __DIR__ . '/../.env';
+function getJsonInput(): array
+{
+    $raw = file_get_contents('php://input') ?: '';
+    $data = json_decode($raw, true);
+    return is_array($data) ? $data : [];
+}
 
-if (file_exists($envFilePath)) {
-    $envContent = file($envFilePath, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+try {
+    $globalStart = microtime(true);
 
-    foreach ($envContent as $line) {
-        $line = trim($line);
-
-        if ($line === '' || str_starts_with($line, '#')) {
-            continue;
-        }
-
-        if (strpos($line, '=') === false) {
-            continue;
-        }
-
-        [$key, $value] = explode('=', $line, 2);
-
-        $key = trim($key);
-        $value = trim($value);
-
-        $value = trim($value, "\"'");
-
-        putenv($key . '=' . $value);
-        $_ENV[$key] = $value;
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        jsonResponse(405, ['ok' => false, 'error' => 'Método no permitido']);
     }
-}
 
-$host     = getenv('DB_HOST') ?: '';
-$port     = getenv('DB_PORT') ?: '';
-$dbname   = getenv('DB_NAME') ?: '';
-$user     = getenv('DB_USER') ?: '';
-$password = getenv('DB_PASSWORD') ?: '';
+    $timer = microtime(true);
+    $pdo = getPdo();
+    logTime('PDO connect/reuse', $timer);
 
-if ($host === '' || $port === '' || $dbname === '' || $user === '') {
-    http_response_code(500);
-    echo json_encode([
-        'ok' => false,
-        'error' => 'Faltan variables de entorno necesarias',
-        'details' => [
-            'DB_HOST' => $host !== '' ? $host : 'no definido',
-            'DB_PORT' => $port !== '' ? $port : 'no definido',
-            'DB_NAME' => $dbname !== '' ? $dbname : 'no definido',
-            'DB_USER' => $user !== '' ? $user : 'no definido',
-            'DB_PASSWORD' => $password !== '' ? 'definido' : 'no definido'
-        ]
-    ], JSON_UNESCAPED_UNICODE);
-    exit;
-}
+    $input = getJsonInput();
 
-try {
-    $dsn = "pgsql:host={$host};port={$port};dbname={$dbname};connect_timeout=5";
+    $telefono = trim((string)($input['telefono'] ?? ''));
+    $clave = (string)($input['password'] ?? '');
 
-    $conn = new PDO($dsn, $user, $password, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        PDO::ATTR_TIMEOUT => 5,
-    ]);
-} catch (Throwable $e) {
-    http_response_code(500);
-    echo json_encode([
-        'ok' => false,
-        'error' => 'Error al conectar a la base de datos',
-        'details' => $e->getMessage()
-    ], JSON_UNESCAPED_UNICODE);
-    exit;
-}
+    if ($telefono === '' || $clave === '') {
+        jsonResponse(400, [
+            'ok' => false,
+            'error' => 'Teléfono y contraseña obligatorios'
+        ]);
+    }
 
-$rawBody = file_get_contents('php://input');
-$input = json_decode($rawBody, true);
+    // ============================
+    // QUERY ÚNICA OPTIMIZADA
+    // ============================
+    $timer = microtime(true);
 
-if (!is_array($input)) {
-    http_response_code(400);
-    echo json_encode([
-        'ok' => false,
-        'error' => 'JSON inválido'
-    ], JSON_UNESCAPED_UNICODE);
-    exit;
-}
-
-$telefono = isset($input['telefono']) ? trim((string)$input['telefono']) : '';
-$clave    = isset($input['password']) ? (string)$input['password'] : '';
-
-if ($telefono === '' || $clave === '') {
-    http_response_code(400);
-    echo json_encode([
-        'ok' => false,
-        'error' => 'Teléfono y contraseña son obligatorios'
-    ], JSON_UNESCAPED_UNICODE);
-    exit;
-}
-
-try {
-    $stmt = $conn->prepare("
+    $stmt = $pdo->prepare("
         SELECT
             u.id,
             u.telefono,
@@ -126,104 +75,87 @@ try {
             u.rol_id,
             u.activo,
             u.clave_bcrypt,
-            r.nombre AS rol_nombre
+            COALESCE(r.nombre,'') AS rol_nombre
         FROM usuarios u
-        LEFT JOIN roles r ON u.rol_id = r.id
+        LEFT JOIN roles r ON r.id = u.rol_id
         WHERE u.telefono = :telefono
         LIMIT 1
     ");
 
-    $stmt->execute([
-        ':telefono' => $telefono
-    ]);
-
+    $stmt->execute([':telefono' => $telefono]);
     $usuario = $stmt->fetch();
 
+    logTime('LOGIN query', $timer);
+
     if (!$usuario) {
-        http_response_code(401);
-        echo json_encode([
-            'ok' => false,
-            'error' => 'Credenciales inválidas'
-        ], JSON_UNESCAPED_UNICODE);
-        exit;
+        jsonResponse(401, ['ok' => false, 'error' => 'Credenciales inválidas']);
     }
 
-    $estaActivo = false;
-    $valorActivo = $usuario['activo'] ?? null;
+    // ============================
+    // VALIDACIÓN ACTIVO ULTRA RÁPIDA
+    // ============================
+    $activoRaw = $usuario['activo'];
 
-    if (is_bool($valorActivo)) {
-        $estaActivo = $valorActivo;
-    } elseif (is_numeric($valorActivo)) {
-        $estaActivo = ((int)$valorActivo === 1);
-    } elseif (is_string($valorActivo)) {
-        $valorNormalizado = strtolower(trim($valorActivo));
-        $estaActivo = in_array($valorNormalizado, ['1', 't', 'true', 'on', 'si', 'sí', 'yes'], true);
-    }
+    $estaActivo =
+        $activoRaw === true ||
+        $activoRaw === 1 ||
+        $activoRaw === '1' ||
+        $activoRaw === 't' ||
+        $activoRaw === 'true';
 
     if (!$estaActivo) {
-        http_response_code(403);
-        echo json_encode([
-            'ok' => false,
-            'error' => 'El usuario no está activo'
-        ], JSON_UNESCAPED_UNICODE);
-        exit;
+        jsonResponse(403, ['ok' => false, 'error' => 'Usuario inactivo']);
     }
 
-    if (empty($usuario['clave_bcrypt']) || !password_verify($clave, (string)$usuario['clave_bcrypt'])) {
-        http_response_code(401);
-        echo json_encode([
-            'ok' => false,
-            'error' => 'Credenciales inválidas'
-        ], JSON_UNESCAPED_UNICODE);
-        exit;
+    // ============================
+    // PASSWORD VERIFY
+    // ============================
+    if (
+        empty($usuario['clave_bcrypt']) ||
+        !password_verify($clave, (string)$usuario['clave_bcrypt'])
+    ) {
+        jsonResponse(401, ['ok' => false, 'error' => 'Credenciales inválidas']);
     }
 
-    $rolNombre = isset($usuario['rol_nombre']) ? trim((string)$usuario['rol_nombre']) : '';
-    $rolSlug = $rolNombre !== ''
-        ? (function_exists('mb_strtolower') ? mb_strtolower($rolNombre, 'UTF-8') : strtolower($rolNombre))
-        : '';
+    // ============================
+    // NORMALIZACIÓN ROL (SIN COSTO EXTRA)
+    // ============================
+    $rol = strtolower(trim((string)$usuario['rol_nombre']));
 
-    $mapaRoles = [
-        'administrador' => 'admin',
-        'admin'         => 'admin',
-        'vendedor'      => 'vendedor',
-        'seller'        => 'vendedor',
-        'promotor'      => 'promotor',
-        'promoter'      => 'promotor',
-    ];
+    if ($rol === 'administrador') $rol = 'admin';
+    if ($rol === 'seller') $rol = 'vendedor';
+    if ($rol === 'promoter') $rol = 'promotor';
 
-    if ($rolSlug !== '' && isset($mapaRoles[$rolSlug])) {
-        $rolSlug = $mapaRoles[$rolSlug];
-    }
-
-    if ($rolSlug === 'promotor') {
-        http_response_code(403);
-        echo json_encode([
+    if ($rol === 'promotor') {
+        jsonResponse(403, [
             'ok' => false,
-            'error' => 'Los promotores no tienen acceso al sistema'
-        ], JSON_UNESCAPED_UNICODE);
-        exit;
+            'error' => 'Promotores no pueden acceder'
+        ]);
     }
 
     unset($usuario['clave_bcrypt']);
 
-    $usuario['rol_slug'] = $rolSlug !== '' ? $rolSlug : null;
-    $usuario['activo'] = (bool)$estaActivo;
+    $usuario['rol_slug'] = $rol !== '' ? $rol : null;
+    $usuario['activo'] = true;
 
+    // ============================
+    // TOKEN ULTRA LIVIANO
+    // ============================
     $token = bin2hex(random_bytes(32));
 
-    echo json_encode([
+    logTime('TOTAL login.php', $globalStart);
+
+    jsonResponse(200, [
         'ok' => true,
         'token' => $token,
         'user' => $usuario
-    ], JSON_UNESCAPED_UNICODE);
-    exit;
+    ]);
 } catch (Throwable $e) {
-    http_response_code(500);
-    echo json_encode([
+    error_log('login.php ERROR: ' . $e->getMessage());
+
+    jsonResponse(500, [
         'ok' => false,
-        'error' => 'Error al validar las credenciales',
-        'details' => $e->getMessage()
-    ], JSON_UNESCAPED_UNICODE);
-    exit;
+        'error' => 'Error interno',
+        'detalle' => $e->getMessage(),
+    ]);
 }

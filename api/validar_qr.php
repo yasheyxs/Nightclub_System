@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/db.php';
+
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: POST, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
@@ -14,18 +16,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 date_default_timezone_set('America/Argentina/Cordoba');
 
-// ======================================
-// CONFIG
-// ======================================
-$host = "aws-1-us-east-2.pooler.supabase.com";
-$port = "5432";
-$dbname = "postgres";
-$user = "postgres.kxvogvgsgwfvtmidabyp";
-$password = "lapicero30!";
-
-// ======================================
-// HELPERS
-// ======================================
 function jsonResponse(int $status, array $data): void
 {
     http_response_code($status);
@@ -35,51 +25,97 @@ function jsonResponse(int $status, array $data): void
 
 function getJsonInput(): array
 {
-    $raw = file_get_contents('php://input');
-    $data = json_decode($raw ?: '', true);
-
-    if (!is_array($data)) {
-        jsonResponse(400, [
-            'ok' => false,
-            'error' => 'Solicitud inválida.'
-        ]);
-    }
-
-    return $data;
+    $raw = file_get_contents('php://input') ?: '';
+    $data = json_decode($raw, true);
+    return is_array($data) ? $data : [];
 }
 
 function getClientIp(): ?string
 {
-    $keys = [
-        'HTTP_X_FORWARDED_FOR',
-        'HTTP_CLIENT_IP',
-        'REMOTE_ADDR'
-    ];
-
-    foreach ($keys as $key) {
-        if (!empty($_SERVER[$key])) {
-            $value = trim((string)$_SERVER[$key]);
-            if ($key === 'HTTP_X_FORWARDED_FOR') {
-                $parts = explode(',', $value);
-                return trim($parts[0]);
-            }
-            return $value;
-        }
-    }
-
-    return null;
+    return $_SERVER['HTTP_X_FORWARDED_FOR']
+        ?? $_SERVER['HTTP_CLIENT_IP']
+        ?? $_SERVER['REMOTE_ADDR']
+        ?? null;
 }
 
-function registrarAccesoQr(
-    PDO $pdo,
-    int $ventaEntradaId,
-    string $qrCodigo,
-    ?int $usuarioValidadorId,
-    string $resultado,
-    ?string $observaciones,
-    ?string $dispositivo,
-    ?string $ip
-): void {
+try {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        jsonResponse(405, ['ok' => false, 'error' => 'Método no permitido']);
+    }
+
+    $pdo = getPdo();
+
+    $input = getJsonInput();
+
+    $qrCodigo = trim((string)($input['qr_codigo'] ?? ''));
+    $usuarioValidadorId = isset($input['usuario_validador_id']) ? (int)$input['usuario_validador_id'] : null;
+    $dispositivo = isset($input['dispositivo']) ? substr((string)$input['dispositivo'], 0, 100) : null;
+    $observaciones = isset($input['observaciones']) ? trim((string)$input['observaciones']) : null;
+    $ip = substr((string)(getClientIp() ?? ''), 0, 100);
+
+    if ($qrCodigo === '') {
+        jsonResponse(400, ['ok' => false, 'error' => 'QR requerido']);
+    }
+
+    // ============================
+    // QUERY ÚNICA (MENOS LATENCIA)
+    // ============================
+    $stmt = $pdo->prepare("
+        SELECT
+            v.id,
+            v.estado,
+            v.nombre,
+            v.dni,
+            v.incluye_trago,
+            v.fecha_venta,
+            v.qr_generado_at,
+            v.qr_usado_at,
+            e.nombre AS entrada_nombre,
+            ev.nombre AS evento_nombre,
+            ev.activo
+        FROM ventas_entradas v
+        LEFT JOIN entradas e ON e.id = v.entrada_id
+        LEFT JOIN eventos ev ON ev.id = v.evento_id
+        WHERE v.qr_codigo = :qr
+        LIMIT 1
+    ");
+    $stmt->execute([':qr' => $qrCodigo]);
+    $venta = $stmt->fetch();
+
+    if (!$venta) {
+        jsonResponse(404, [
+            'ok' => false,
+            'resultado' => 'invalido',
+            'mensaje' => 'QR inválido'
+        ]);
+    }
+
+    $ventaId = (int)$venta['id'];
+    $estado = strtolower((string)$venta['estado']);
+
+    // ============================
+    // TRANSACCIÓN
+    // ============================
+    $pdo->beginTransaction();
+
+    // ============================
+    // LOG + RESPUESTAS RÁPIDAS
+    // ============================
+    $resultado = 'valido';
+    $mensaje = 'Ingreso válido';
+
+    if ($estado === 'anulada') {
+        $resultado = 'anulado';
+        $mensaje = 'Entrada anulada';
+    } elseif ($estado === 'usada') {
+        $resultado = 'usado';
+        $mensaje = 'Entrada ya usada';
+    } elseif ($estado !== 'comprada') {
+        $resultado = 'invalido';
+        $mensaje = 'Estado inválido';
+    }
+
+    // LOG SIEMPRE (UNA SOLA QUERY)
     $stmt = $pdo->prepare("
         INSERT INTO accesos_qr (
             venta_entrada_id,
@@ -90,245 +126,44 @@ function registrarAccesoQr(
             observaciones,
             dispositivo,
             ip
-        )
-        VALUES (
-            :venta_entrada_id,
-            :qr_codigo,
-            NOW(),
-            :usuario_validador_id,
-            :resultado,
-            :observaciones,
-            :dispositivo,
-            :ip
+        ) VALUES (
+            :vid, :qr, NOW(), :uid, :res, :obs, :disp, :ip
         )
     ");
 
     $stmt->execute([
-        ':venta_entrada_id' => $ventaEntradaId,
-        ':qr_codigo' => $qrCodigo,
-        ':usuario_validador_id' => $usuarioValidadorId,
-        ':resultado' => $resultado,
-        ':observaciones' => $observaciones,
-        ':dispositivo' => $dispositivo,
+        ':vid' => $ventaId,
+        ':qr' => $qrCodigo,
+        ':uid' => $usuarioValidadorId,
+        ':res' => $resultado,
+        ':obs' => $observaciones,
+        ':disp' => $dispositivo,
         ':ip' => $ip
     ]);
-}
 
-function obtenerEntradasEscaneadasActivas(PDO $pdo): int
-{
-    $stmt = $pdo->query("
-        SELECT COUNT(a.id) AS entradas_escaneadas
-        FROM accesos_qr a
-        INNER JOIN ventas_entradas v ON v.id = a.venta_entrada_id
-        INNER JOIN eventos e ON e.id = v.evento_id
-        WHERE a.resultado = 'valido'
-          AND e.activo = TRUE
-    ");
+    // ============================
+    // SOLO UPDATE SI ES VÁLIDO
+    // ============================
+    if ($resultado === 'valido') {
+        $stmt = $pdo->prepare("
+            UPDATE ventas_entradas
+            SET estado = 'usada', qr_usado_at = NOW()
+            WHERE id = :id
+            RETURNING estado, qr_usado_at
+        ");
+        $stmt->execute([':id' => $ventaId]);
+        $updated = $stmt->fetch();
 
-    $row = $stmt->fetch();
-    return (int)($row['entradas_escaneadas'] ?? 0);
-}
-
-try {
-    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-        jsonResponse(405, [
-            'ok' => false,
-            'error' => 'Método no permitido.'
-        ]);
+        $venta['estado'] = $updated['estado'];
+        $venta['qr_usado_at'] = $updated['qr_usado_at'];
     }
-
-    $pdo = new PDO(
-        "pgsql:host=$host;port=$port;dbname=$dbname;user=$user;password=$password;sslmode=require"
-    );
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-
-    $input = getJsonInput();
-
-    $qrCodigo = isset($input['qr_codigo']) ? trim((string)$input['qr_codigo']) : '';
-    $usuarioValidadorId = isset($input['usuario_validador_id']) && $input['usuario_validador_id'] !== null
-        ? (int)$input['usuario_validador_id']
-        : null;
-
-    $dispositivo = isset($input['dispositivo']) ? trim((string)$input['dispositivo']) : null;
-    $observaciones = isset($input['observaciones']) ? trim((string)$input['observaciones']) : null;
-    $ip = getClientIp();
-
-    if ($dispositivo !== null && $dispositivo !== '') {
-        $dispositivo = mb_substr($dispositivo, 0, 100);
-    } else {
-        $dispositivo = null;
-    }
-
-    if ($ip !== null && $ip !== '') {
-        $ip = mb_substr($ip, 0, 100);
-    } else {
-        $ip = null;
-    }
-
-    $stmt = $pdo->prepare("
-        SELECT
-            v.id,
-            v.entrada_id,
-            v.evento_id,
-            v.usuario_id,
-            v.promotor_id,
-            v.estado,
-            v.nombre,
-            v.dni,
-            v.incluye_trago,
-            v.fecha_venta,
-            v.qr_codigo,
-            v.qr_generado_at,
-            v.qr_usado_at,
-            e.nombre AS entrada_nombre,
-            ev.nombre AS evento_nombre,
-            ev.activo AS evento_activo
-        FROM ventas_entradas v
-        LEFT JOIN entradas e ON e.id = v.entrada_id
-        LEFT JOIN eventos ev ON ev.id = v.evento_id
-        WHERE v.qr_codigo = :qr_codigo
-        LIMIT 1
-    ");
-    $stmt->execute([':qr_codigo' => $qrCodigo]);
-    $venta = $stmt->fetch();
-
-    if (!$venta) {
-        jsonResponse(404, [
-            'ok' => false,
-            'resultado' => 'invalido',
-            'mensaje' => 'QR inválido. No existe una entrada asociada.',
-            'entradas_escaneadas' => obtenerEntradasEscaneadasActivas($pdo)
-        ]);
-    }
-
-    $ventaId = (int)$venta['id'];
-    $estado = strtolower(trim((string)$venta['estado']));
-
-    $pdo->beginTransaction();
-
-    if ($estado === 'anulada') {
-        registrarAccesoQr(
-            $pdo,
-            $ventaId,
-            $qrCodigo,
-            $usuarioValidadorId,
-            'anulado',
-            $observaciones ?: 'Intento de ingreso con entrada anulada.',
-            $dispositivo,
-            $ip
-        );
-
-        $pdo->commit();
-
-        jsonResponse(200, [
-            'ok' => false,
-            'resultado' => 'anulado',
-            'mensaje' => 'La entrada está anulada.',
-            'entradas_escaneadas' => obtenerEntradasEscaneadasActivas($pdo),
-            'data' => [
-                'venta_id' => $ventaId,
-                'entrada' => $venta['entrada_nombre'],
-                'evento' => $venta['evento_nombre'],
-                'nombre' => $venta['nombre'],
-                'dni' => $venta['dni'],
-                'incluye_trago' => filter_var($venta['incluye_trago'], FILTER_VALIDATE_BOOLEAN),
-                'estado' => $venta['estado'],
-                'qr_usado_at' => $venta['qr_usado_at']
-            ]
-        ]);
-    }
-
-    if ($estado === 'usada') {
-        registrarAccesoQr(
-            $pdo,
-            $ventaId,
-            $qrCodigo,
-            $usuarioValidadorId,
-            'usado',
-            $observaciones ?: 'Intento duplicado con entrada ya usada.',
-            $dispositivo,
-            $ip
-        );
-
-        $pdo->commit();
-
-        jsonResponse(200, [
-            'ok' => false,
-            'resultado' => 'usado',
-            'mensaje' => 'La entrada ya fue utilizada.',
-            'entradas_escaneadas' => obtenerEntradasEscaneadasActivas($pdo),
-            'data' => [
-                'venta_id' => $ventaId,
-                'entrada' => $venta['entrada_nombre'],
-                'evento' => $venta['evento_nombre'],
-                'nombre' => $venta['nombre'],
-                'dni' => $venta['dni'],
-                'incluye_trago' => filter_var($venta['incluye_trago'], FILTER_VALIDATE_BOOLEAN),
-                'estado' => $venta['estado'],
-                'qr_usado_at' => $venta['qr_usado_at']
-            ]
-        ]);
-    }
-
-    if ($estado !== 'comprada') {
-        registrarAccesoQr(
-            $pdo,
-            $ventaId,
-            $qrCodigo,
-            $usuarioValidadorId,
-            'invalido',
-            $observaciones ?: 'Estado no válido para ingreso.',
-            $dispositivo,
-            $ip
-        );
-
-        $pdo->commit();
-
-        jsonResponse(400, [
-            'ok' => false,
-            'resultado' => 'invalido',
-            'mensaje' => 'La entrada no está en un estado válido para ingresar.',
-            'entradas_escaneadas' => obtenerEntradasEscaneadasActivas($pdo),
-            'data' => [
-                'venta_id' => $ventaId,
-                'estado' => $venta['estado']
-            ]
-        ]);
-    }
-
-    $update = $pdo->prepare("
-        UPDATE ventas_entradas
-        SET
-            estado = 'usada',
-            qr_usado_at = NOW()
-        WHERE id = :id
-        RETURNING
-            id,
-            estado,
-            qr_usado_at
-    ");
-    $update->execute([':id' => $ventaId]);
-    $updated = $update->fetch();
-
-    registrarAccesoQr(
-        $pdo,
-        $ventaId,
-        $qrCodigo,
-        $usuarioValidadorId,
-        'valido',
-        $observaciones ?: 'Ingreso válido.',
-        $dispositivo,
-        $ip
-    );
 
     $pdo->commit();
 
     jsonResponse(200, [
-        'ok' => true,
-        'resultado' => 'valido',
-        'mensaje' => 'Ingreso válido.',
-        'entradas_escaneadas' => obtenerEntradasEscaneadasActivas($pdo),
+        'ok' => $resultado === 'valido',
+        'resultado' => $resultado,
+        'mensaje' => $mensaje,
         'data' => [
             'venta_id' => $ventaId,
             'entrada' => $venta['entrada_nombre'],
@@ -336,30 +171,23 @@ try {
             'nombre' => $venta['nombre'],
             'dni' => $venta['dni'],
             'incluye_trago' => filter_var($venta['incluye_trago'], FILTER_VALIDATE_BOOLEAN),
-            'estado' => $updated['estado'],
+            'estado' => $venta['estado'],
             'fecha_venta' => $venta['fecha_venta'],
             'qr_generado_at' => $venta['qr_generado_at'],
-            'qr_usado_at' => $updated['qr_usado_at']
+            'qr_usado_at' => $venta['qr_usado_at']
         ]
     ]);
-} catch (PDOException $e) {
-
-    if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
-        $pdo->rollBack();
-    }
-
-    jsonResponse(500, [
-        'ok' => false,
-        'error' => 'Error SQL',
-        'details' => $e->getMessage()
-    ]);
 } catch (Throwable $e) {
-    if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
+
+    if (isset($pdo) && $pdo->inTransaction()) {
         $pdo->rollBack();
     }
 
+    error_log("validar_qr ERROR: " . $e->getMessage());
+
     jsonResponse(500, [
         'ok' => false,
-        'error' => 'Error inesperado: ' . $e->getMessage()
+        'error' => 'Error interno',
+        'detalle' => $e->getMessage()
     ]);
 }

@@ -1,35 +1,65 @@
 <?php
-// === HABILITAR CORS ANTES DE TODO ===
+
+declare(strict_types=1);
+
+require_once __DIR__ . '/db.php';
+
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
 header("Content-Type: application/json; charset=utf-8");
 
-// Responder preflight OPTIONS (necesario para Axios y Vite)
+ini_set('display_errors', '0');
+error_reporting(0);
+
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);
     exit;
 }
 
-// === CONFIGURACIÓN Y DEBUG ===
-ini_set('display_errors', 1);
-error_reporting(E_ALL);
+date_default_timezone_set('America/Argentina/Cordoba');
 
-$host = "aws-1-us-east-2.pooler.supabase.com";
-$port = "5432";
-$dbname = "postgres";
-$user = "postgres.kxvogvgsgwfvtmidabyp";
-$password = "lapicero30!";
+function logTime(string $label, float $start): void
+{
+    error_log($label . ': ' . round((microtime(true) - $start) * 1000, 2) . ' ms');
+}
+
+function jsonResponse(int $status, array $data): void
+{
+    http_response_code($status);
+    echo json_encode($data, JSON_UNESCAPED_UNICODE);
+    exit;
+}
 
 try {
-    $conn = new PDO("pgsql:host=$host;port=$port;dbname=$dbname;user=$user;password=$password;sslmode=require");
-    $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $globalStart = microtime(true);
 
-    $stmt = $conn->query("SELECT id, nombre FROM roles ORDER BY id");
-    $roles = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $timer = microtime(true);
+    $pdo = getPdo();
+    logTime('PDO connect/reuse', $timer);
 
-    echo json_encode($roles);
-} catch (PDOException $e) {
-    http_response_code(500);
-    echo json_encode(["error" => $e->getMessage()]);
+    if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
+        jsonResponse(405, ['error' => 'Método no permitido']);
+    }
+
+    $timer = microtime(true);
+    $stmt = $pdo->query("
+        SELECT
+            id,
+            nombre
+        FROM roles
+        ORDER BY id ASC
+    ");
+    $roles = $stmt->fetchAll() ?: [];
+    logTime('GET roles query', $timer);
+
+    logTime('TOTAL roles.php', $globalStart);
+    jsonResponse(200, $roles);
+} catch (Throwable $e) {
+    error_log('roles.php ERROR: ' . $e->getMessage());
+
+    jsonResponse(500, [
+        'error' => 'Error interno',
+        'detalle' => $e->getMessage(),
+    ]);
 }

@@ -1,245 +1,317 @@
 <?php
-// === CORS ===
+
+declare(strict_types=1);
+
+require_once __DIR__ . '/db.php';
+
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
 header("Content-Type: application/json; charset=utf-8");
+
+ini_set('display_errors', '0');
+error_reporting(0);
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);
     exit;
 }
 
-// === CONEXIÓN A SUPABASE ===
-$host = "aws-1-us-east-2.pooler.supabase.com";
-$port = "5432";
-$dbname = "postgres";
-$user = "postgres.kxvogvgsgwfvtmidabyp";
-$password = "lapicero30!";
+date_default_timezone_set('America/Argentina/Cordoba');
+
+function logTime(string $label, float $start): void
+{
+    error_log($label . ': ' . round((microtime(true) - $start) * 1000, 2) . ' ms');
+}
+
+function jsonResponse(int $status, array $data): void
+{
+    http_response_code($status);
+    echo json_encode($data, JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+function getJsonInput(): array
+{
+    $raw = file_get_contents('php://input') ?: '';
+    $data = json_decode($raw, true);
+
+    return is_array($data) ? $data : [];
+}
+
+function isAdminRole(string $roleName): bool
+{
+    return strpos(strtolower(trim($roleName)), 'admin') !== false;
+}
 
 try {
-    $conn = new PDO("pgsql:host=$host;port=$port;dbname=$dbname;user=$user;password=$password;sslmode=require");
-    $conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-} catch (PDOException $e) {
-    http_response_code(500);
-    echo json_encode(['error' => 'Error al conectar a la base: ' . $e->getMessage()]);
-    exit;
-}
+    $globalStart = microtime(true);
 
-// === DETERMINAR MÉTODO ===
-$method = $_SERVER['REQUEST_METHOD'];
+    $timer = microtime(true);
+    $pdo = getPdo();
+    logTime('PDO connect/reuse', $timer);
 
-function respondWithError(int $code, string $message): void
-{
-    http_response_code($code);
-    echo json_encode(['error' => $message]);
-    exit;
-}
+    $method = $_SERVER['REQUEST_METHOD'];
 
-function readJsonBody(): array
-{
-    $body = file_get_contents("php://input");
-    if ($body === false || $body === '') {
-        return [];
+    // ============================
+    // GET OPTIMIZADO
+    // ============================
+    if ($method === 'GET') {
+        $timer = microtime(true);
+
+        $stmt = $pdo->query("
+            SELECT
+                u.id,
+                u.nombre,
+                u.telefono,
+                u.email,
+                u.rol_id,
+                u.activo,
+                u.fecha_creacion,
+                COALESCE(r.nombre, '') AS rol_nombre
+            FROM usuarios u
+            LEFT JOIN roles r ON r.id = u.rol_id
+            ORDER BY u.id ASC
+        ");
+
+        $usuarios = $stmt->fetchAll() ?: [];
+        logTime('GET usuarios query', $timer);
+
+        logTime('TOTAL usuarios.php', $globalStart);
+        jsonResponse(200, $usuarios);
     }
-    $decoded = json_decode($body, true);
-    return is_array($decoded) ? $decoded : [];
-}
 
-function isAdminRoleName(?string $roleName): bool
-{
-    if (!$roleName) {
-        return false;
-    }
-    $normalized = trim($roleName);
-    if ($normalized === '') {
-        return false;
-    }
-    if (function_exists('mb_strtolower')) {
-        $normalized = mb_strtolower($normalized, 'UTF-8');
-    } else {
-        $normalized = strtolower($normalized);
-    }
-    return strpos($normalized, 'admin') !== false;
-}
+    // ============================
+    // POST OPTIMIZADO
+    // ============================
+    if ($method === 'POST') {
+        $input = getJsonInput();
 
-switch ($method) {
-
-    // LISTAR USUARIOS
-    case 'GET':
-        $stmt = $conn->query("SELECT * FROM usuarios ORDER BY id ASC");
-        $usuarios = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        echo json_encode($usuarios);
-        break;
-
-    // CREAR USUARIO
-    case 'POST':
-        $input = readJsonBody();
-
-        if (!$input || empty($input['nombre']) || empty($input['telefono']) || empty($input['rolId'])) {
-            respondWithError(400, 'Faltan datos obligatorios.');
+        if (
+            empty($input['nombre']) ||
+            empty($input['telefono']) ||
+            empty($input['rolId'])
+        ) {
+            jsonResponse(400, ['error' => 'Faltan datos obligatorios']);
         }
 
-        $nombre = $input['nombre'];
-        $telefono = $input['telefono'];
+        $nombre = trim((string)$input['nombre']);
+        $telefono = trim((string)$input['telefono']);
         $email = $input['email'] ?? null;
-        $rolId = $input['rolId'];
-        $activo = isset($input['activo']) ? (int)$input['activo'] : 1;
-        $password = isset($input['password']) ? trim($input['password']) : '';
+        $rolId = (int)$input['rolId'];
+        $activo = isset($input['activo']) ? (bool)$input['activo'] : true;
+        $password = trim((string)($input['password'] ?? ''));
 
-        if ($password === '') {
-            respondWithError(400, 'La contraseña es obligatoria para crear un usuario.');
-        }
-
-        if (strlen($password) < 8) {
-            respondWithError(400, 'La contraseña debe tener al menos 8 caracteres.');
+        if ($password === '' || strlen($password) < 8) {
+            jsonResponse(400, ['error' => 'Password inválido']);
         }
 
         $passwordHash = password_hash($password, PASSWORD_BCRYPT);
 
-        $stmt = $conn->prepare("INSERT INTO usuarios (nombre, telefono, email, rol_id, activo, fecha_creacion, clave_bcrypt)
-                                VALUES (:nombre, :telefono, :email, :rol_id, :activo, NOW(), :clave_bcrypt)
-                                RETURNING *");
+        $timer = microtime(true);
+        $stmt = $pdo->prepare("
+            INSERT INTO usuarios (
+                nombre,
+                telefono,
+                email,
+                rol_id,
+                activo,
+                fecha_creacion,
+                clave_bcrypt
+            )
+            VALUES (
+                :nombre,
+                :telefono,
+                :email,
+                :rol_id,
+                :activo,
+                NOW(),
+                :clave
+            )
+            RETURNING id, nombre, telefono, email, rol_id, activo, fecha_creacion
+        ");
         $stmt->execute([
             ':nombre' => $nombre,
             ':telefono' => $telefono,
             ':email' => $email,
             ':rol_id' => $rolId,
             ':activo' => $activo,
-            ':clave_bcrypt' => $passwordHash,
+            ':clave' => $passwordHash,
         ]);
-        $usuario = $stmt->fetch(PDO::FETCH_ASSOC);
-        echo json_encode($usuario);
-        break;
+        $usuario = $stmt->fetch();
+        logTime('POST usuario insert', $timer);
 
-    // ACTUALIZAR USUARIO
-    case 'PUT':
+        logTime('TOTAL usuarios.php', $globalStart);
+        jsonResponse(200, $usuario ?: []);
+    }
+
+    // ============================
+    // PUT OPTIMIZADO
+    // ============================
+    if ($method === 'PUT') {
         if (!isset($_GET['id'])) {
-            respondWithError(400, 'Falta el parámetro id');
+            jsonResponse(400, ['error' => 'ID requerido']);
         }
+
         $id = (int)$_GET['id'];
-        $input = readJsonBody();
+        if ($id <= 0) {
+            jsonResponse(400, ['error' => 'ID inválido']);
+        }
 
-        $stmtCurrent = $conn->prepare("SELECT id, clave_bcrypt FROM usuarios WHERE id = :id LIMIT 1");
-        $stmtCurrent->execute([':id' => $id]);
-        $currentUser = $stmtCurrent->fetch(PDO::FETCH_ASSOC);
+        $input = getJsonInput();
 
-        if (!$currentUser) {
-            respondWithError(404, 'Usuario no encontrado');
+        $timer = microtime(true);
+        $stmt = $pdo->prepare("
+            SELECT id, clave_bcrypt
+            FROM usuarios
+            WHERE id = :id
+            LIMIT 1
+        ");
+        $stmt->execute([':id' => $id]);
+        $user = $stmt->fetch();
+        logTime('PUT fetch usuario', $timer);
+
+        if ($user === false) {
+            jsonResponse(404, ['error' => 'Usuario no encontrado']);
         }
 
         $nombre = $input['nombre'] ?? null;
         $telefono = $input['telefono'] ?? null;
         $email = $input['email'] ?? null;
         $rolId = $input['rolId'] ?? null;
-        $activo = isset($input['activo']) ? (int)$input['activo'] : 1;
-        $currentPassword = isset($input['currentPassword']) ? trim($input['currentPassword']) : '';
-        $newPassword = isset($input['newPassword']) ? trim($input['newPassword']) : '';
-        $shouldUpdatePassword = false;
-        $newPasswordHash = null;
+        $activo = isset($input['activo']) ? (bool)$input['activo'] : null;
+
+        $newPassword = trim((string)($input['newPassword'] ?? ''));
+        $currentPassword = trim((string)($input['currentPassword'] ?? ''));
+
+        $updatePassword = false;
+        $newHash = null;
 
         if ($newPassword !== '' || $currentPassword !== '') {
-            if ($currentPassword === '' || $newPassword === '') {
-                respondWithError(400, 'Debes ingresar la contraseña actual y una nueva para actualizarla.');
+            if ($newPassword === '' || $currentPassword === '') {
+                jsonResponse(400, ['error' => 'Password incompleto']);
+            }
+
+            if (!password_verify($currentPassword, $user['clave_bcrypt'])) {
+                jsonResponse(401, ['error' => 'Password incorrecto']);
             }
 
             if (strlen($newPassword) < 8) {
-                respondWithError(400, 'La nueva contraseña debe tener al menos 8 caracteres.');
+                jsonResponse(400, ['error' => 'Password corto']);
             }
 
-            $storedHash = $currentUser['clave_bcrypt'] ?? null;
-            if (!$storedHash) {
-                respondWithError(400, 'No se puede actualizar la contraseña porque el usuario no tiene una contraseña registrada.');
-            }
-
-            if (!password_verify($currentPassword, $storedHash)) {
-                respondWithError(401, 'La contraseña actual no es correcta. Si no la recuerdas utiliza "Olvidé mi contraseña".');
-            }
-
-            if (password_verify($newPassword, $storedHash)) {
-                respondWithError(400, 'La nueva contraseña no puede ser igual a la contraseña actual.');
-            }
-
-            $newPasswordHash = password_hash($newPassword, PASSWORD_BCRYPT);
-            $shouldUpdatePassword = true;
+            $newHash = password_hash($newPassword, PASSWORD_BCRYPT);
+            $updatePassword = true;
         }
 
-        $sql = "UPDATE usuarios
-                                SET nombre = :nombre, telefono = :telefono, email = :email, rol_id = :rol_id, activo = :activo";
+        $sql = "
+            UPDATE usuarios SET
+                nombre = COALESCE(:nombre, nombre),
+                telefono = COALESCE(:telefono, telefono),
+                email = COALESCE(:email, email),
+                rol_id = COALESCE(:rol_id, rol_id),
+                activo = COALESCE(:activo, activo)
+        ";
+
         $params = [
+            ':id' => $id,
             ':nombre' => $nombre,
             ':telefono' => $telefono,
             ':email' => $email,
             ':rol_id' => $rolId,
             ':activo' => $activo,
-            ':id' => $id
         ];
 
-        if ($shouldUpdatePassword && $newPasswordHash) {
-            $sql .= ", clave_bcrypt = :clave_bcrypt";
-            $params[':clave_bcrypt'] = $newPasswordHash;
+        if ($updatePassword && $newHash) {
+            $sql .= ", clave_bcrypt = :clave";
+            $params[':clave'] = $newHash;
         }
 
-        $sql .= " WHERE id = :id RETURNING *";
+        $sql .= " WHERE id = :id RETURNING id, nombre, telefono, email, rol_id, activo, fecha_creacion";
 
-        $stmt = $conn->prepare($sql);
+        $timer = microtime(true);
+        $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
+        $updated = $stmt->fetch();
+        logTime('PUT update usuario', $timer);
 
-        $usuario = $stmt->fetch(PDO::FETCH_ASSOC);
-        echo json_encode($usuario);
-        break;
+        logTime('TOTAL usuarios.php', $globalStart);
+        jsonResponse(200, $updated ?: []);
+    }
 
-    // ELIMINAR USUARIO
-    case 'DELETE':
+    // ============================
+    // DELETE OPTIMIZADO
+    // ============================
+    if ($method === 'DELETE') {
         if (!isset($_GET['id'])) {
-            respondWithError(400, 'Falta el parámetro id');
+            jsonResponse(400, ['error' => 'ID requerido']);
         }
+
         $id = (int)$_GET['id'];
-        $input = readJsonBody();
-        $passwordProvided = isset($input['password']) ? trim($input['password']) : '';
-
-        $stmtUser = $conn->prepare("SELECT u.id, u.rol_id, u.activo, u.clave_bcrypt, COALESCE(r.nombre, '') AS rol_nombre
-                                     FROM usuarios u
-                                     LEFT JOIN roles r ON u.rol_id = r.id
-                                     WHERE u.id = :id LIMIT 1");
-        $stmtUser->execute([':id' => $id]);
-        $user = $stmtUser->fetch(PDO::FETCH_ASSOC);
-
-        if (!$user) {
-            respondWithError(404, 'Usuario no encontrado');
+        if ($id <= 0) {
+            jsonResponse(400, ['error' => 'ID inválido']);
         }
 
-        $isAdmin = isAdminRoleName($user['rol_nombre'] ?? '');
+        $input = getJsonInput();
+        $password = trim((string)($input['password'] ?? ''));
 
-        if ($isAdmin) {
-            $stmtAdminCount = $conn->prepare("SELECT COUNT(*)
-                FROM usuarios u
-                LEFT JOIN roles r ON u.rol_id = r.id
-                WHERE u.id <> :id AND u.activo = true AND LOWER(COALESCE(r.nombre, '')) LIKE '%admin%'");
-            $stmtAdminCount->execute([':id' => $id]);
-            $remainingAdmins = (int)$stmtAdminCount->fetchColumn();
-
-            if ($remainingAdmins === 0) {
-                respondWithError(400, 'Debe existir al menos un administrador activo en el sistema.');
-            }
-
-            if ($passwordProvided === '') {
-                respondWithError(400, 'Debes ingresar la contraseña del administrador antes de eliminarlo.');
-            }
-
-            $hash = $user['clave_bcrypt'] ?? null;
-            if (!$hash || !password_verify($passwordProvided, $hash)) {
-                respondWithError(401, 'La contraseña no coincide. Si no la recuerdas utiliza "Olvidé mi contraseña".');
-            }
-        }
-
-        $stmt = $conn->prepare("DELETE FROM usuarios WHERE id = :id");
+        $timer = microtime(true);
+        $stmt = $pdo->prepare("
+            SELECT
+                u.id,
+                u.clave_bcrypt,
+                COALESCE(r.nombre, '') AS rol_nombre
+            FROM usuarios u
+            LEFT JOIN roles r ON r.id = u.rol_id
+            WHERE u.id = :id
+            LIMIT 1
+        ");
         $stmt->execute([':id' => $id]);
-        echo json_encode(['message' => 'Usuario eliminado correctamente']);
-        break;
+        $user = $stmt->fetch();
+        logTime('DELETE fetch usuario', $timer);
 
-    default:
-        http_response_code(405);
-        echo json_encode(['error' => 'Método no permitido']);
-        break;
+        if ($user === false) {
+            jsonResponse(404, ['error' => 'Usuario no encontrado']);
+        }
+
+        if (isAdminRole($user['rol_nombre'])) {
+            $timer = microtime(true);
+            $stmt = $pdo->prepare("
+                SELECT COUNT(*)
+                FROM usuarios u
+                LEFT JOIN roles r ON r.id = u.rol_id
+                WHERE u.id <> :id
+                  AND u.activo = TRUE
+                  AND LOWER(COALESCE(r.nombre,'')) LIKE '%admin%'
+            ");
+            $stmt->execute([':id' => $id]);
+            $count = (int)$stmt->fetchColumn();
+            logTime('DELETE count admins', $timer);
+
+            if ($count === 0) {
+                jsonResponse(400, ['error' => 'Debe existir al menos un admin']);
+            }
+
+            if ($password === '' || !password_verify($password, $user['clave_bcrypt'])) {
+                jsonResponse(401, ['error' => 'Password incorrecto']);
+            }
+        }
+
+        $timer = microtime(true);
+        $stmt = $pdo->prepare("DELETE FROM usuarios WHERE id = :id");
+        $stmt->execute([':id' => $id]);
+        logTime('DELETE usuario', $timer);
+
+        logTime('TOTAL usuarios.php', $globalStart);
+        jsonResponse(200, ['success' => true]);
+    }
+
+    jsonResponse(405, ['error' => 'Método no permitido']);
+} catch (Throwable $e) {
+    error_log('usuarios.php ERROR: ' . $e->getMessage());
+
+    jsonResponse(500, [
+        'error' => 'Error interno',
+        'detalle' => $e->getMessage(),
+    ]);
 }

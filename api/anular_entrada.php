@@ -2,10 +2,15 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/db.php';
+
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: POST, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
 header("Content-Type: application/json; charset=utf-8");
+
+ini_set('display_errors', '0');
+error_reporting(0);
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);
@@ -14,18 +19,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 date_default_timezone_set('America/Argentina/Cordoba');
 
-// ======================================
-// CONFIG
-// ======================================
-$host = "aws-1-us-east-2.pooler.supabase.com";
-$port = "5432";
-$dbname = "postgres";
-$user = "postgres.kxvogvgsgwfvtmidabyp";
-$password = "lapicero30!";
+function logTime(string $label, float $start): void
+{
+    error_log($label . ': ' . round((microtime(true) - $start) * 1000, 2) . ' ms');
+}
 
-// ======================================
-// HELPERS
-// ======================================
 function jsonResponse(int $status, array $data): void
 {
     http_response_code($status);
@@ -35,127 +33,97 @@ function jsonResponse(int $status, array $data): void
 
 function getJsonInput(): array
 {
-    $raw = file_get_contents('php://input');
-    $data = json_decode($raw ?: '', true);
-
-    if (!is_array($data)) {
-        jsonResponse(400, ['ok' => false, 'error' => 'Solicitud inválida.']);
-    }
-
-    return $data;
+    $raw = file_get_contents('php://input') ?: '';
+    $data = json_decode($raw, true);
+    return is_array($data) ? $data : [];
 }
 
 try {
+    $globalStart = microtime(true);
+
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-        jsonResponse(405, ['ok' => false, 'error' => 'Método no permitido.']);
+        jsonResponse(405, ['ok' => false, 'error' => 'Método no permitido']);
     }
 
-    $pdo = new PDO(
-        "pgsql:host=$host;port=$port;dbname=$dbname;user=$user;password=$password;sslmode=require"
-    );
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+    $timer = microtime(true);
+    $pdo = getPdo();
+    logTime('PDO connect/reuse', $timer);
 
     $input = getJsonInput();
 
-    if (!isset($input['evento_id'], $input['entrada_id'], $input['cantidad'])) {
-        jsonResponse(400, [
-            'ok' => false,
-            'error' => 'Los campos evento_id, entrada_id y cantidad son obligatorios.'
-        ]);
-    }
-
-    $eventoId = (int)$input['evento_id'];
-    $entradaId = (int)$input['entrada_id'];
-    $cantidad = (int)$input['cantidad'];
-    $motivo = isset($input['motivo']) ? trim((string)$input['motivo']) : 'Ajuste manual desde panel';
+    $eventoId = (int)($input['evento_id'] ?? 0);
+    $entradaId = (int)($input['entrada_id'] ?? 0);
+    $cantidad = (int)($input['cantidad'] ?? 0);
     $usuarioId = isset($input['usuario_id']) ? (int)$input['usuario_id'] : null;
+    $motivo = trim((string)($input['motivo'] ?? 'Ajuste manual'));
 
-    if ($eventoId <= 0 || $entradaId <= 0) {
-        jsonResponse(400, [
-            'ok' => false,
-            'error' => 'evento_id y entrada_id deben ser mayores a 0.'
-        ]);
+    if ($eventoId <= 0 || $entradaId <= 0 || $cantidad <= 0) {
+        jsonResponse(400, ['ok' => false, 'error' => 'Datos inválidos']);
     }
 
-    if ($cantidad <= 0) {
-        jsonResponse(400, [
-            'ok' => false,
-            'error' => 'La cantidad a anular debe ser mayor a 0.'
-        ]);
-    }
+    // ============================
+    // VALIDACIÓN ULTRA OPTIMIZADA
+    // ============================
+    $timer = microtime(true);
 
-    $eventoStmt = $pdo->prepare("
-        SELECT id, nombre
-        FROM eventos
-        WHERE id = :id
-        LIMIT 1
+    $stmt = $pdo->prepare("
+        SELECT
+            (SELECT nombre FROM eventos WHERE id = :evento_id LIMIT 1) AS evento_nombre,
+            (SELECT nombre FROM entradas WHERE id = :entrada_id LIMIT 1) AS entrada_nombre,
+            (
+                SELECT COUNT(*)
+                FROM ventas_entradas
+                WHERE evento_id = :evento_id
+                  AND entrada_id = :entrada_id
+                  AND estado = 'comprada'
+            ) AS disponibles
     ");
-    $eventoStmt->execute([':id' => $eventoId]);
-    $evento = $eventoStmt->fetch();
 
-    if (!$evento) {
-        jsonResponse(404, [
-            'ok' => false,
-            'error' => 'Evento no encontrado.'
-        ]);
-    }
-
-    $entradaStmt = $pdo->prepare("
-        SELECT id, nombre
-        FROM entradas
-        WHERE id = :id
-        LIMIT 1
-    ");
-    $entradaStmt->execute([':id' => $entradaId]);
-    $entrada = $entradaStmt->fetch();
-
-    if (!$entrada) {
-        jsonResponse(404, [
-            'ok' => false,
-            'error' => 'Entrada no encontrada.'
-        ]);
-    }
-
-    $disponiblesStmt = $pdo->prepare("
-        SELECT COUNT(*) AS disponibles
-        FROM ventas_entradas
-        WHERE evento_id = :evento_id
-          AND entrada_id = :entrada_id
-          AND estado = 'comprada'
-    ");
-    $disponiblesStmt->execute([
+    $stmt->execute([
         ':evento_id' => $eventoId,
         ':entrada_id' => $entradaId
     ]);
 
-    $disponibles = (int)($disponiblesStmt->fetch()['disponibles'] ?? 0);
+    $meta = $stmt->fetch();
+    logTime('validacion unica query', $timer);
+
+    if (!$meta['evento_nombre']) {
+        jsonResponse(404, ['ok' => false, 'error' => 'Evento no encontrado']);
+    }
+
+    if (!$meta['entrada_nombre']) {
+        jsonResponse(404, ['ok' => false, 'error' => 'Entrada no encontrada']);
+    }
+
+    $disponibles = (int)$meta['disponibles'];
 
     if ($disponibles <= 0) {
-        jsonResponse(400, [
-            'ok' => false,
-            'error' => 'No hay entradas en estado comprada para anular.'
-        ]);
+        jsonResponse(400, ['ok' => false, 'error' => 'No hay entradas disponibles']);
     }
 
     if ($cantidad > $disponibles) {
         jsonResponse(400, [
             'ok' => false,
-            'error' => 'No podés anular más entradas de las disponibles.',
+            'error' => 'Cantidad excede disponibles',
             'disponibles' => $disponibles
         ]);
     }
 
+    // ============================
+    // TRANSACCIÓN OPTIMIZADA
+    // ============================
     $pdo->beginTransaction();
 
-    $anularStmt = $pdo->prepare("
-        WITH candidatas AS (
-            SELECT id
+    $timer = microtime(true);
+
+    $stmt = $pdo->prepare("
+        WITH cte AS (
+            SELECT id, promotor_id
             FROM ventas_entradas
             WHERE evento_id = :evento_id
               AND entrada_id = :entrada_id
               AND estado = 'comprada'
-            ORDER BY fecha_venta DESC, id DESC
+            ORDER BY id DESC
             LIMIT :cantidad
             FOR UPDATE
         )
@@ -163,120 +131,87 @@ try {
         SET
             estado = 'anulada',
             observaciones = CASE
-                WHEN COALESCE(v.observaciones, '') = '' THEN :observaciones
-                ELSE v.observaciones || ' | ' || :observaciones
+                WHEN COALESCE(v.observaciones,'') = ''
+                THEN :obs
+                ELSE v.observaciones || ' | ' || :obs
             END
-        FROM candidatas c
-        WHERE v.id = c.id
-        RETURNING
-            v.id,
-            v.evento_id,
-            v.entrada_id,
-            v.estado,
-            v.fecha_venta,
-            v.qr_codigo,
-            v.nombre,
-            v.dni,
-            v.observaciones,
-            v.promotor_id
+        FROM cte
+        WHERE v.id = cte.id
+        RETURNING v.id, v.promotor_id
     ");
 
-    $observaciones = $usuarioId !== null
-        ? $motivo . ' | usuario_id=' . $usuarioId
+    $obs = $usuarioId
+        ? $motivo . ' | user=' . $usuarioId
         : $motivo;
 
-    $anularStmt->bindValue(':evento_id', $eventoId, PDO::PARAM_INT);
-    $anularStmt->bindValue(':entrada_id', $entradaId, PDO::PARAM_INT);
-    $anularStmt->bindValue(':cantidad', $cantidad, PDO::PARAM_INT);
-    $anularStmt->bindValue(':observaciones', $observaciones, PDO::PARAM_STR);
-    $anularStmt->execute();
+    $stmt->bindValue(':evento_id', $eventoId, PDO::PARAM_INT);
+    $stmt->bindValue(':entrada_id', $entradaId, PDO::PARAM_INT);
+    $stmt->bindValue(':cantidad', $cantidad, PDO::PARAM_INT);
+    $stmt->bindValue(':obs', $obs, PDO::PARAM_STR);
+    $stmt->execute();
 
-    $anuladas = $anularStmt->fetchAll();
+    $rows = $stmt->fetchAll();
+    logTime('update anulacion', $timer);
 
-    if (count($anuladas) !== $cantidad) {
+    if (count($rows) !== $cantidad) {
         $pdo->rollBack();
-        jsonResponse(409, [
-            'ok' => false,
-            'error' => 'No se pudieron anular todas las entradas solicitadas. Reintentá.'
-        ]);
+        jsonResponse(409, ['ok' => false, 'error' => 'Conflicto al anular']);
     }
 
-    $devolucionesPorPromotor = [];
+    // ============================
+    // UPDATE CUPOS AGRUPADO
+    // ============================
+    $timer = microtime(true);
 
-    foreach ($anuladas as $row) {
-        $promotorId = isset($row['promotor_id']) ? (int)$row['promotor_id'] : 0;
-
-        if ($promotorId > 0) {
-            if (!isset($devolucionesPorPromotor[$promotorId])) {
-                $devolucionesPorPromotor[$promotorId] = 0;
-            }
-
-            $devolucionesPorPromotor[$promotorId]++;
+    $map = [];
+    foreach ($rows as $r) {
+        $pid = (int)$r['promotor_id'];
+        if ($pid > 0) {
+            $map[$pid] = ($map[$pid] ?? 0) + 1;
         }
     }
 
-    if (!empty($devolucionesPorPromotor)) {
-        $devolverCupoStmt = $pdo->prepare("
+    if ($map) {
+        $stmt = $pdo->prepare("
             UPDATE promotores_cupos
-            SET cupo_vendido = GREATEST(cupo_vendido - :cantidad, 0)
-            WHERE usuario_id = :usuario_id
+            SET cupo_vendido = GREATEST(cupo_vendido - :cant, 0)
+            WHERE usuario_id = :uid
               AND evento_id = :evento_id
               AND entrada_id = :entrada_id
         ");
 
-        foreach ($devolucionesPorPromotor as $promotorId => $cantidadDevolver) {
-            $devolverCupoStmt->execute([
-                ':cantidad' => $cantidadDevolver,
-                ':usuario_id' => $promotorId,
+        foreach ($map as $uid => $cant) {
+            $stmt->execute([
+                ':cant' => $cant,
+                ':uid' => $uid,
                 ':evento_id' => $eventoId,
                 ':entrada_id' => $entradaId
             ]);
         }
     }
 
+    logTime('update cupos', $timer);
+
     $pdo->commit();
+
+    logTime('TOTAL anular.php', $globalStart);
 
     jsonResponse(200, [
         'ok' => true,
-        'mensaje' => count($anuladas) . ' ' . (count($anuladas) === 1 ? 'entrada anulada' : 'entradas anuladas') . ' correctamente.',
-        'resumen' => [
-            'evento_id' => $eventoId,
-            'evento_nombre' => $evento['nombre'],
-            'entrada_id' => $entradaId,
-            'entrada_nombre' => $entrada['nombre'],
-            'cantidad_anulada' => count($anuladas)
-        ],
-        'tickets' => array_map(function ($row) {
-            return [
-                'id' => (int)$row['id'],
-                'evento_id' => $row['evento_id'] !== null ? (int)$row['evento_id'] : null,
-                'entrada_id' => $row['entrada_id'] !== null ? (int)$row['entrada_id'] : null,
-                'estado' => $row['estado'],
-                'fecha_venta' => $row['fecha_venta'],
-                'qr_codigo' => $row['qr_codigo'],
-                'nombre' => $row['nombre'],
-                'dni' => $row['dni'],
-                'observaciones' => $row['observaciones'],
-                'promotor_id' => $row['promotor_id'] !== null ? (int)$row['promotor_id'] : null
-            ];
-        }, $anuladas)
-    ]);
-} catch (PDOException $e) {
-    if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
-        $pdo->rollBack();
-    }
-
-    jsonResponse(500, [
-        'ok' => false,
-        'error' => $e->getMessage()
+        'cantidad' => $cantidad,
+        'evento_nombre' => $meta['evento_nombre'],
+        'entrada_nombre' => $meta['entrada_nombre']
     ]);
 } catch (Throwable $e) {
-    if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
+    if (isset($pdo) && $pdo->inTransaction()) {
         $pdo->rollBack();
     }
 
+    error_log('anular.php ERROR: ' . $e->getMessage());
+
     jsonResponse(500, [
         'ok' => false,
-        'error' => 'Error inesperado: ' . $e->getMessage()
+        'error' => 'Error interno',
+        'detalle' => $e->getMessage()
     ]);
 }
