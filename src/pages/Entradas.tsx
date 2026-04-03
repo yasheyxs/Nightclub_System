@@ -472,7 +472,40 @@ export default function Entradas() {
         const cantidadRegistrada = data?.tickets?.length ?? cantidadVenta;
         const printJobs = data?.print_jobs ?? [];
 
-        await enviarATicketera(printJobs);
+        cerrarVenta();
+
+        toast({
+          title: "Venta registrada",
+          description: `${cantidadRegistrada} ${
+            cantidadRegistrada === 1 ? "entrada" : "entradas"
+          } de ${entrada.nombre} registradas correctamente.`,
+        });
+
+        setRegistrandoVenta(false);
+
+        void enviarATicketera(printJobs)
+          .then(() => {
+            toast({
+              title: "Impresión enviada",
+              description: `Se enviaron ${cantidadRegistrada} tickets a la ticketera.`,
+            });
+          })
+          .catch((printError: unknown) => {
+            console.error("Error al imprimir:", printError);
+
+            const printMessage =
+              printError instanceof Error && printError.message.trim() !== ""
+                ? printError.message
+                : "La venta quedó registrada, pero la impresión falló.";
+
+            toast({
+              title: "Error de impresión",
+              description: printMessage,
+              variant: "destructive",
+            });
+          });
+
+        return;
 
         const eventKey = String(selectedEvent);
         const entradaKey = sellingEntradaId;
@@ -605,7 +638,9 @@ export default function Entradas() {
         variant: "destructive",
       });
     } finally {
-      setRegistrandoVenta(false);
+      if (tipoOperacion === "resta") {
+        setRegistrandoVenta(false);
+      }
     }
   };
 
