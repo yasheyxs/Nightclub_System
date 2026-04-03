@@ -410,28 +410,95 @@ export default function Anticipadas() {
   const handlePrint = async (itemId: number) => {
     setPrintingId(itemId);
 
+    interface PrintJob {
+      ticket_id: number;
+      evento_id: number | null;
+      entrada_id: number | null;
+      usuario_id: number | null;
+      tipo: string;
+      precio: number;
+      precio_formateado: string;
+      incluye_trago: boolean;
+      trago_texto: string;
+      qr: string;
+      estado: string;
+      fecha: string;
+      hora: string;
+      negocio: string;
+      ancho_papel: string;
+      evento_fecha?: string;
+      es_cortesia?: boolean;
+      lista?: string;
+    }
+
+    interface ImprimirAnticipadaResponse {
+      success?: boolean;
+      mensaje?: string;
+      id_eliminado?: number;
+      entrada?: string;
+      print_jobs?: PrintJob[];
+    }
+
+    interface PrinterResponse {
+      ok?: boolean;
+      mensaje?: string;
+      error?: string;
+    }
+
     try {
-      const { data } = await api.post("/anticipadas", {
-        accion: "imprimir",
-        id: itemId,
+      const { data } = await api.post<ImprimirAnticipadaResponse>(
+        "/anticipadas",
+        {
+          accion: "imprimir",
+          id: itemId,
+        },
+      );
+
+      const printJobs = Array.isArray(data?.print_jobs) ? data.print_jobs : [];
+
+      if (printJobs.length === 0) {
+        throw new Error("El backend no devolvió tickets para imprimir.");
+      }
+
+      const printerResponse = await fetch("http://localhost:3001/print", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          tickets: printJobs,
+        }),
       });
 
-      const mensaje =
-        typeof data?.mensaje === "string"
-          ? data.mensaje
-          : "Ticket enviado a impresión.";
+      const printerData = (await printerResponse
+        .json()
+        .catch(() => null)) as PrinterResponse | null;
+
+      if (!printerResponse.ok || printerData?.ok === false) {
+        throw new Error(
+          printerData?.error ??
+            "No se pudo enviar el ticket al servicio de impresión.",
+        );
+      }
 
       setAnticipadas((prev) => prev.filter((item) => item.id !== itemId));
 
       toast({
         title: "Ticket impreso",
-        description: mensaje,
+        description:
+          printerData?.mensaje ??
+          data?.mensaje ??
+          "Ticket enviado a impresión.",
       });
     } catch (error) {
       console.error("Error al imprimir anticipada:", error);
+
+      const message =
+        error instanceof Error ? error.message : "Reintentá en unos segundos.";
+
       toast({
         title: "No se pudo imprimir",
-        description: "Reintentá en unos segundos.",
+        description: message,
         variant: "destructive",
       });
     } finally {

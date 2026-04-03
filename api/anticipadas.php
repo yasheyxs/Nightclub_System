@@ -16,66 +16,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 date_default_timezone_set('America/Argentina/Cordoba');
 
-function generarContenidoTicket(string $tipoEntrada, float $monto, bool $incluyeTrago): string
+function generarQrHash(string $qr): string
 {
-    $ancho = 42;
-
-    $contenido = "\n";
-    $contenido .= str_repeat("=", 15) . "\n";
-
-    $titulo = "-- SANTAS --";
-    $espacios = ($ancho - strlen($titulo)) / 2;
-    $contenido .= str_repeat(" ", (int) floor($espacios)) . $titulo . str_repeat(" ", (int) ceil($espacios)) . "\n";
-
-    $contenido .= str_repeat("=", 15) . "\n\n";
-
-    $contenido .= "Entrada: " . $tipoEntrada . "\n";
-    $contenido .= "Total: $" . number_format($monto, 0, ',', '.') . "\n";
-
-    if ($incluyeTrago) {
-        $contenido .= "INCLUYE TRAGO GRATIS\n";
-    }
-
-    $contenido .= "\n" . str_repeat("=", 15) . "\n";
-    $contenido .= " Gracias por tu compra \n";
-    $contenido .= str_repeat("=", 15) . "\n\n";
-
-    $contenido .= "\n\x1D\x56\x00";
-
-    return $contenido;
+    return hash('sha256', $qr);
 }
 
-function enviarAImpresora(string $contenido): void
+function formatearFechaEvento(?string $fecha): ?string
 {
-    $archivoTemporal = tempnam(sys_get_temp_dir(), 'ticket_');
-
-    if ($archivoTemporal === false || file_put_contents($archivoTemporal, $contenido) === false) {
-        throw new RuntimeException('No se pudo generar el archivo del ticket.');
+    if ($fecha === null || trim($fecha) === '') {
+        return null;
     }
 
-    $comando = 'cmd.exe /c start /min notepad /p ' . escapeshellarg($archivoTemporal);
-    $salida = [];
-    $codigo = 0;
-    exec($comando, $salida, $codigo);
-
-    @unlink($archivoTemporal);
-
-    if ($codigo !== 0) {
-        $mensajeSalida = trim(implode("\n", $salida));
-        throw new RuntimeException('Error al enviar el ticket a la impresora: ' . $mensajeSalida);
+    try {
+        $dt = new DateTime($fecha);
+        return $dt->format('d/m/Y');
+    } catch (Throwable $e) {
+        return null;
     }
 }
 
-function imprimirTickets(string $tipoEntrada, float $montoUnitario, int $cantidad, bool $incluyeTrago): void
+function obtenerTextoTrago(bool $incluyeTrago): string
 {
-    if ($cantidad <= 0) {
-        return;
-    }
-
-    for ($i = 0; $i < $cantidad; $i++) {
-        $contenido = generarContenidoTicket($tipoEntrada, $montoUnitario, $incluyeTrago);
-        enviarAImpresora($contenido);
-    }
+    return $incluyeTrago ? 'INCLUYE TRAGO GRATIS' : '';
 }
 
 function generarQrCodigo(): string
@@ -411,25 +373,27 @@ try {
             }
 
             $stmt = $pdo->prepare(<<<SQL
-                SELECT
-                    v.id,
-                    v.nombre,
-                    v.dni,
-                    v.entrada_id,
-                    v.evento_id,
-                    v.cantidad,
-                    v.incluye_trago,
-                    v.qr_codigo,
-                    e.nombre AS entrada_nombre,
-                    v.precio_unitario AS entrada_precio,
-                    ev.nombre AS evento_nombre
-                FROM ventas_entradas v
-                LEFT JOIN entradas e ON e.id = v.entrada_id
-                LEFT JOIN eventos ev ON ev.id = v.evento_id
-                WHERE v.id = :id
-                  AND v.estado = 'comprada'
-                LIMIT 1
-            SQL);
+        SELECT
+            v.id,
+            v.nombre,
+            v.dni,
+            v.entrada_id,
+            v.evento_id,
+            v.usuario_id,
+            v.cantidad,
+            v.incluye_trago,
+            v.qr_codigo,
+            v.precio_unitario AS entrada_precio,
+            e.nombre AS entrada_nombre,
+            ev.nombre AS evento_nombre,
+            ev.fecha AS evento_fecha
+        FROM ventas_entradas v
+        LEFT JOIN entradas e ON e.id = v.entrada_id
+        LEFT JOIN eventos ev ON ev.id = v.evento_id
+        WHERE v.id = :id
+          AND v.estado = 'comprada'
+        LIMIT 1
+    SQL);
             $stmt->execute([':id' => $id]);
             $anticipada = $stmt->fetch();
 
@@ -439,77 +403,78 @@ try {
                 exit;
             }
 
-            $nombreEntrada = $anticipada['entrada_nombre'] ?? 'Anticipada';
+            $nombreEntrada = trim((string) ($anticipada['entrada_nombre'] ?? 'Anticipada'));
             $precio = isset($anticipada['entrada_precio']) ? (float) $anticipada['entrada_precio'] : 0.0;
-            $cantidad = isset($anticipada['cantidad']) ? (int) $anticipada['cantidad'] : 1;
+            $cantidad = max(1, (int) ($anticipada['cantidad'] ?? 1));
             $incluyeTrago = filter_var($anticipada['incluye_trago'], FILTER_VALIDATE_BOOLEAN);
+            $eventoId = isset($anticipada['evento_id']) ? (int) $anticipada['evento_id'] : null;
+            $entradaId = isset($anticipada['entrada_id']) ? (int) $anticipada['entrada_id'] : null;
+            $usuarioId = isset($anticipada['usuario_id']) ? (int) $anticipada['usuario_id'] : null;
+            $eventoFecha = formatearFechaEvento($anticipada['evento_fecha'] ?? null);
 
             $qrCodigo = trim((string) ($anticipada['qr_codigo'] ?? ''));
             if ($qrCodigo === '') {
                 do {
                     $qrCodigo = generarQrCodigo();
 
-                    $checkQrStmt = $pdo->prepare('
-                        SELECT 1
-                        FROM ventas_entradas
-                        WHERE qr_codigo = :qr_codigo
-                        LIMIT 1
-                    ');
+                    $checkQrStmt = $pdo->prepare(<<<SQL
+                SELECT 1
+                FROM ventas_entradas
+                WHERE qr_codigo = :qr_codigo
+                LIMIT 1
+            SQL);
                     $checkQrStmt->execute([':qr_codigo' => $qrCodigo]);
                     $existeQr = (bool) $checkQrStmt->fetchColumn();
                 } while ($existeQr);
             }
 
-            imprimirTickets($nombreEntrada, $precio, $cantidad, $incluyeTrago);
+            $qrHash = generarQrHash($qrCodigo);
 
             $updateStmt = $pdo->prepare(<<<SQL
-                UPDATE ventas_entradas
-                SET
-                    qr_codigo = :qr_codigo,
-                    qr_generado_at = NOW()
-                WHERE id = :id
-            SQL);
+        UPDATE ventas_entradas
+        SET
+            qr_codigo = :qr_codigo,
+            qr_hash = :qr_hash,
+            qr_generado_at = NOW()
+        WHERE id = :id
+    SQL);
             $updateStmt->execute([
                 ':qr_codigo' => $qrCodigo,
+                ':qr_hash' => $qrHash,
                 ':id' => $id,
             ]);
 
+            $printJobs = [];
+
+            for ($i = 0; $i < $cantidad; $i++) {
+                $printJobs[] = [
+                    'ticket_id' => (int) $anticipada['id'],
+                    'evento_id' => $eventoId,
+                    'entrada_id' => $entradaId,
+                    'usuario_id' => $usuarioId,
+                    'tipo' => $nombreEntrada,
+                    'precio' => (int) round($precio),
+                    'precio_formateado' => number_format($precio, 0, ',', '.'),
+                    'incluye_trago' => $incluyeTrago,
+                    'trago_texto' => obtenerTextoTrago($incluyeTrago),
+                    'qr' => $qrCodigo,
+                    'estado' => 'comprada',
+                    'fecha' => date('d/m/Y'),
+                    'hora' => date('H:i'),
+                    'negocio' => 'SANTAS',
+                    'ancho_papel' => '80mm',
+                    'evento_fecha' => $eventoFecha,
+                    'es_cortesia' => false,
+                    'lista' => '',
+                ];
+            }
+
             echo json_encode([
                 'success' => true,
-                'mensaje' => 'Ticket enviado a impresión y retirado del listado.',
+                'mensaje' => 'Ticket preparado para impresión.',
                 'id_eliminado' => $id,
                 'entrada' => $nombreEntrada,
-            ], JSON_UNESCAPED_UNICODE);
-            exit;
-        }
-
-        if ($accion === 'eliminar') {
-            $id = isset($input['id']) ? (int) $input['id'] : null;
-
-            if (!$id) {
-                http_response_code(400);
-                echo json_encode(['error' => 'Debe indicar el ID de la anticipada a eliminar.']);
-                exit;
-            }
-
-            $stmt = $pdo->prepare(<<<SQL
-                UPDATE ventas_entradas
-                SET estado = 'anulada'
-                WHERE id = :id
-                  AND estado = 'comprada'
-            SQL);
-            $stmt->execute([':id' => $id]);
-
-            if ($stmt->rowCount() === 0) {
-                http_response_code(404);
-                echo json_encode(['error' => 'No se encontró el registro solicitado.']);
-                exit;
-            }
-
-            echo json_encode([
-                'success' => true,
-                'mensaje' => 'Registro anulado correctamente.',
-                'id_eliminado' => $id,
+                'print_jobs' => $printJobs,
             ], JSON_UNESCAPED_UNICODE);
             exit;
         }

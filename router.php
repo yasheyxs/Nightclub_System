@@ -78,6 +78,11 @@ switch ($uriPath) {
     case '/api/usuarios.php':
         require __DIR__ . '/api/usuarios.php';
         exit;
+
+    case '/api/promotores_cupos':
+    case '/api/promotores_cupos.php':
+        require __DIR__ . '/api/promotores_cupos.php';
+        exit;
 }
 
 header('Content-Type: application/json; charset=utf-8');

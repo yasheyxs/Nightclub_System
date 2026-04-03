@@ -50,10 +50,7 @@ try {
             WHERE u.activo = true
               AND LOWER(TRIM(r.nombre)) IN (
                     'promotor',
-                    'promoter',
-                    'admin',
-                    'administrador',
-                    'owner'
+                    'promoter'
               )
             ORDER BY u.nombre ASC
         SQL);

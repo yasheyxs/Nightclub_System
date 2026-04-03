@@ -38,11 +38,14 @@ interface PromotorCupo {
   id?: number | null;
   usuario_id: number;
   usuario_nombre: string;
+  usuario_rol?: string;
+  es_promotor?: boolean;
   evento_id: number;
   entrada_id: number;
-  cupo_total: number;
-  cupo_vendido: number;
-  cupo_disponible: number;
+  cupo_total: number | null;
+  cupo_vendido: number | null;
+  cupo_disponible: number | null;
+  tiene_cupo?: boolean;
 }
 
 const normalizeEntradaName = (name: string) =>
@@ -170,20 +173,37 @@ export default function Promotores() {
     if (!selectedEventoId || !selectedEntrada) {
       return;
     }
-    if (promotorCupos.length === 0) {
+
+    const promotoresValidos = promotorCupos.filter((item) => {
+      const rol = (item.usuario_rol ?? "").trim().toLowerCase();
+      return (
+        item.es_promotor === true || rol === "promotor" || rol === "promoter"
+      );
+    });
+
+    if (promotoresValidos.length === 0) {
       toast({
         title: "Sin promotores",
-        description: "No hay cupos para actualizar.",
+        description: "No hay promotores válidos para actualizar.",
       });
       return;
     }
-    const cuposPayload = promotorCupos.map((promotor) => {
-      const cupoTotal = Number(cupoEdits[promotor.usuario_id]);
-      return { promotor, cupoTotal };
+
+    const cuposPayload = promotoresValidos.map((promotor) => {
+      const rawValue =
+        cupoEdits[promotor.usuario_id] ?? String(promotor.cupo_total ?? 0);
+      const cupoTotal = Number(rawValue);
+
+      return {
+        promotor,
+        cupoTotal,
+      };
     });
+
     const invalidCupo = cuposPayload.find(
       ({ cupoTotal }) => Number.isNaN(cupoTotal) || cupoTotal < 0,
     );
+
     if (invalidCupo) {
       toast({
         title: "Cupo inválido",
@@ -192,7 +212,9 @@ export default function Promotores() {
       });
       return;
     }
+
     setSavingAllCupos(true);
+
     try {
       await Promise.all(
         cuposPayload.map(({ promotor, cupoTotal }) =>
@@ -204,16 +226,23 @@ export default function Promotores() {
           }),
         ),
       );
+
       await fetchPromotorCupos(selectedEventoId, selectedEntrada.id);
+
       toast({
         title: "Cupos actualizados",
         description: "Se actualizaron los cupos de todos los promotores.",
       });
     } catch (error) {
       console.error("Error actualizando cupos de promotores:", error);
+
+      const apiMessage =
+        (error as { response?: { data?: { error?: string } } })?.response?.data
+          ?.error ?? "Reintentá en unos segundos.";
+
       toast({
         title: "No se pudo actualizar",
-        description: "Reintentá en unos segundos.",
+        description: apiMessage,
         variant: "destructive",
       });
     } finally {
