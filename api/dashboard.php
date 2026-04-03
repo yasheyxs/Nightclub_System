@@ -14,61 +14,83 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 date_default_timezone_set('America/Argentina/Cordoba');
 
-function sendCsvExport(string $filename, array $metrics, ?array $monthlySummary, array $pastEvents, ?array $currentNight): void
+function sendCsvExport(string $filename, array $metrics, ?array $monthlySummary, array $pastEvents, ?array $currentNight, array $upcomingEvents = []): void
 {
     $rows = [];
-    $rows[] = ['Sección', 'Concepto', 'Valor'];
-    $rows[] = ['Métricas del mes', 'Eventos del mes', $metrics['eventosMes']];
-    $rows[] = ['Métricas del mes', 'Entradas vendidas', $metrics['entradasMes']];
-    $rows[] = ['Métricas del mes', 'Entradas escaneadas', $metrics['entradasEscaneadas'] ?? 0];
-    $rows[] = ['Métricas del mes', 'Recaudación', number_format($metrics['recaudacionMes'], 2, ',', '.')];
-    $rows[] = ['Métricas del mes', 'Ocupación promedio', $metrics['ocupacionPromedio'] . '%'];
 
+    // ===== RESUMEN GENERAL =====
+    $rows[] = ['==== RESUMEN GENERAL ===='];
+    $rows[] = ['Eventos del mes', $metrics['eventosMes']];
+    $rows[] = ['Entradas vendidas', $metrics['entradasMes']];
+    $rows[] = ['Entradas escaneadas', $metrics['entradasEscaneadas']];
+    $rows[] = ['Recaudación', '$' . number_format($metrics['recaudacionMes'], 2, ',', '.')];
+    $rows[] = ['Ocupación promedio', $metrics['ocupacionPromedio'] . '%'];
+
+    // ===== RESUMEN MENSUAL =====
     if ($monthlySummary) {
         $rows[] = [];
-        $rows[] = ['Resumen mensual', 'Mes', $monthlySummary['monthLabel']];
-        $rows[] = ['Resumen mensual', 'Total eventos', $monthlySummary['totalEventos']];
-        $rows[] = ['Resumen mensual', 'Total entradas', $monthlySummary['totalEntradas']];
-        $rows[] = ['Resumen mensual', 'Recaudación', number_format($monthlySummary['recaudacion'], 2, ',', '.')];
-        $rows[] = ['Resumen mensual', 'Ocupación promedio', $monthlySummary['ocupacionPromedio'] . '%'];
+        $rows[] = ['==== RESUMEN MENSUAL ===='];
+        $rows[] = ['Mes', $monthlySummary['monthLabel']];
+        $rows[] = ['Total eventos', $monthlySummary['totalEventos']];
+        $rows[] = ['Total entradas', $monthlySummary['totalEntradas']];
+        $rows[] = ['Recaudación', '$' . number_format($monthlySummary['recaudacion'], 2, ',', '.')];
+        $rows[] = ['Ocupación promedio', $monthlySummary['ocupacionPromedio'] . '%'];
     }
 
+    // ===== EVENTO EN CURSO =====
     if ($currentNight) {
         $rows[] = [];
-        $rows[] = ['Evento en curso', 'Nombre', $currentNight['eventName']];
-        $rows[] = ['Evento en curso', 'Fecha', $currentNight['fecha']];
-        $rows[] = ['Evento en curso', 'Entradas', $currentNight['entradasVendidas']];
-        $rows[] = ['Evento en curso', 'Ocupación', $currentNight['ocupacion'] . '%'];
+        $rows[] = ['==== EVENTO EN CURSO ===='];
+        $rows[] = ['Nombre', $currentNight['eventName']];
+        $rows[] = ['Fecha', $currentNight['fecha']];
+        $rows[] = ['Entradas', $currentNight['entradasVendidas']];
+        $rows[] = ['Recaudación', '$' . number_format($currentNight['recaudacion'], 2, ',', '.')];
+        $rows[] = ['Ocupación', $currentNight['ocupacion'] . '%'];
     }
 
+    // ===== EVENTOS DEL MES =====
     $rows[] = [];
-    $rows[] = ['Eventos del mes', 'Nombre', 'Fecha', 'Entradas', 'Recaudación', 'Ocupación'];
-    if (count($pastEvents) === 0) {
-        $rows[] = ['Eventos del mes', 'Sin eventos registrados', '', '', '', ''];
-    } else {
-        foreach ($pastEvents as $event) {
+    $rows[] = ['==== EVENTOS DEL MES ===='];
+    $rows[] = ['Nombre', 'Fecha', 'Entradas', 'Recaudación', 'Ocupación'];
+
+    foreach ($pastEvents as $event) {
+        $rows[] = [
+            $event['name'],
+            substr($event['date'], 0, 10),
+            $event['entradasVendidas'],
+            '$' . number_format($event['recaudacion'], 2, ',', '.'),
+            $event['ocupacion'] . '%'
+        ];
+    }
+
+    // ===== PRÓXIMOS EVENTOS =====
+    if (!empty($upcomingEvents)) {
+        $rows[] = [];
+        $rows[] = ['==== PRÓXIMOS EVENTOS ===='];
+        $rows[] = ['Nombre', 'Fecha', 'Recaudación', 'Ocupación'];
+
+        foreach ($upcomingEvents as $event) {
             $rows[] = [
-                'Eventos del mes',
                 $event['name'],
                 substr($event['date'], 0, 10),
-                $event['entradasVendidas'],
-                number_format($event['recaudacion'], 2, ',', '.'),
+                '$' . number_format($event['recaudacion'], 2, ',', '.'),
                 $event['ocupacion'] . '%'
             ];
         }
     }
 
+    // EXPORT
     $stream = fopen('php://temp', 'r+');
     foreach ($rows as $row) {
         fputcsv($stream, $row, ';');
     }
+
     rewind($stream);
-    $csv = stream_get_contents($stream);
+    echo stream_get_contents($stream);
     fclose($stream);
 
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="' . $filename . '"');
-    echo $csv;
     exit;
 }
 
@@ -149,46 +171,53 @@ function buildSimplePdf(array $lines): string
 function sendPdfExport(string $filename, array $metrics, ?array $monthlySummary, array $pastEvents, ?array $currentNight): void
 {
     $lines = [];
-    $lines[] = 'Dashboard Santas - Resumen de métricas';
-    if ($monthlySummary) {
-        $lines[] = 'Mes: ' . $monthlySummary['monthLabel'];
-    }
-    $lines[] = '';
-    $lines[] = 'Eventos del mes: ' . $metrics['eventosMes'];
-    $lines[] = 'Entradas vendidas: ' . $metrics['entradasMes'];
-    $lines[] = 'Entradas escaneadas: ' . ($metrics['entradasEscaneadas'] ?? 0);
-    $lines[] = 'Recaudación: $' . number_format($metrics['recaudacionMes'], 2, ',', '.');
-    $lines[] = 'Ocupación promedio: ' . $metrics['ocupacionPromedio'] . '%';
 
+    $lines[] = '===== DASHBOARD SANTAS =====';
+    $lines[] = '';
+
+    // RESUMEN
+    $lines[] = '--- RESUMEN GENERAL ---';
+    $lines[] = 'Eventos: ' . $metrics['eventosMes'];
+    $lines[] = 'Entradas: ' . $metrics['entradasMes'];
+    $lines[] = 'Escaneadas: ' . $metrics['entradasEscaneadas'];
+    $lines[] = 'Recaudación: $' . number_format($metrics['recaudacionMes'], 2, ',', '.');
+    $lines[] = 'Ocupación: ' . $metrics['ocupacionPromedio'] . '%';
+
+    // RESUMEN MENSUAL
+    if ($monthlySummary) {
+        $lines[] = '';
+        $lines[] = '--- RESUMEN MENSUAL ---';
+        $lines[] = 'Mes: ' . $monthlySummary['monthLabel'];
+        $lines[] = 'Eventos: ' . $monthlySummary['totalEventos'];
+        $lines[] = 'Entradas: ' . $monthlySummary['totalEntradas'];
+        $lines[] = 'Recaudación: $' . number_format($monthlySummary['recaudacion'], 2, ',', '.');
+    }
+
+    // EVENTO ACTUAL
     if ($currentNight) {
         $lines[] = '';
-        $lines[] = 'Evento en curso: ' . $currentNight['eventName'];
-        $lines[] = 'Fecha: ' . $currentNight['fecha'];
+        $lines[] = '--- EVENTO EN CURSO ---';
+        $lines[] = $currentNight['eventName'];
         $lines[] = 'Entradas: ' . $currentNight['entradasVendidas'];
         $lines[] = 'Ocupación: ' . $currentNight['ocupacion'] . '%';
     }
 
+    // EVENTOS
     $lines[] = '';
-    $lines[] = 'Eventos del mes:';
-    if (count($pastEvents) === 0) {
-        $lines[] = '  • Sin eventos registrados en el período.';
-    } else {
-        foreach (array_slice($pastEvents, 0, 8) as $event) {
-            $lines[] = sprintf(
-                '  • %s - %s | Entradas: %d | Recaudación: $%s',
-                substr($event['date'], 0, 10),
-                $event['name'],
-                $event['entradasVendidas'],
-                number_format($event['recaudacion'], 2, ',', '.')
-            );
-        }
-        if (count($pastEvents) > 8) {
-            $lines[] = '  • ...';
-        }
+    $lines[] = '--- EVENTOS DEL MES ---';
+
+    foreach ($pastEvents as $event) {
+        $lines[] = sprintf(
+            '%s | %s | %d entradas | $%s',
+            substr($event['date'], 0, 10),
+            $event['name'],
+            $event['entradasVendidas'],
+            number_format($event['recaudacion'], 2, ',', '.')
+        );
     }
 
-    $sanitizedLines = array_map('removeAccents', $lines);
-    $pdf = buildSimplePdf($sanitizedLines);
+    $pdf = buildSimplePdf(array_map('removeAccents', $lines));
+
     header('Content-Type: application/pdf');
     header('Content-Disposition: attachment; filename="' . $filename . '"');
     echo $pdf;
@@ -571,11 +600,12 @@ try {
 
     if ($export === 'csv') {
         sendCsvExport(
-            'dashboard-metricas-' . date('Ymd_His') . '.csv',
+            'dashboard-' . date('Ymd_His') . '.csv',
             $metrics,
             $monthlySummary,
             $pastEvents,
-            $currentNight
+            $currentNight,
+            $upcomingEvents
         );
     }
 
