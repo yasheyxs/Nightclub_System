@@ -1,10 +1,12 @@
 <?php
 
+declare(strict_types=1);
+
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: GET, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
 
-ini_set('display_errors', 0);
+ini_set('display_errors', '0');
 error_reporting(0);
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
@@ -14,41 +16,80 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 date_default_timezone_set('America/Argentina/Cordoba');
 
-function sendCsvExport(string $filename, array $metrics, ?array $monthlySummary, array $pastEvents, ?array $currentNight, array $upcomingEvents = []): void
+function logTime(string $label, float $start): void
 {
+    error_log($label . ': ' . round((microtime(true) - $start) * 1000, 2) . ' ms');
+}
+
+function sendJson(int $statusCode, array $payload): void
+{
+    http_response_code($statusCode);
+    header("Content-Type: application/json; charset=utf-8");
+    echo json_encode($payload, JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+function getSpanishMonthLabel(string $dateYmd): string
+{
+    $months = [
+        1 => 'Enero',
+        2 => 'Febrero',
+        3 => 'Marzo',
+        4 => 'Abril',
+        5 => 'Mayo',
+        6 => 'Junio',
+        7 => 'Julio',
+        8 => 'Agosto',
+        9 => 'Septiembre',
+        10 => 'Octubre',
+        11 => 'Noviembre',
+        12 => 'Diciembre',
+    ];
+
+    $timestamp = strtotime($dateYmd);
+    $month = (int)date('n', $timestamp);
+    $year = date('Y', $timestamp);
+
+    return ($months[$month] ?? '') . ' ' . $year;
+}
+
+function sendCsvExport(
+    string $filename,
+    array $metrics,
+    ?array $monthlySummary,
+    array $pastEvents,
+    ?array $currentNight,
+    array $upcomingEvents = []
+): void {
     $rows = [];
 
-    // ===== RESUMEN GENERAL =====
     $rows[] = ['==== RESUMEN GENERAL ===='];
     $rows[] = ['Eventos del mes', $metrics['eventosMes']];
     $rows[] = ['Entradas vendidas', $metrics['entradasMes']];
     $rows[] = ['Entradas escaneadas', $metrics['entradasEscaneadas']];
-    $rows[] = ['Recaudación', '$' . number_format($metrics['recaudacionMes'], 2, ',', '.')];
+    $rows[] = ['Recaudación', '$' . number_format((float)$metrics['recaudacionMes'], 2, ',', '.')];
     $rows[] = ['Ocupación promedio', $metrics['ocupacionPromedio'] . '%'];
 
-    // ===== RESUMEN MENSUAL =====
-    if ($monthlySummary) {
+    if ($monthlySummary !== null) {
         $rows[] = [];
         $rows[] = ['==== RESUMEN MENSUAL ===='];
         $rows[] = ['Mes', $monthlySummary['monthLabel']];
         $rows[] = ['Total eventos', $monthlySummary['totalEventos']];
         $rows[] = ['Total entradas', $monthlySummary['totalEntradas']];
-        $rows[] = ['Recaudación', '$' . number_format($monthlySummary['recaudacion'], 2, ',', '.')];
+        $rows[] = ['Recaudación', '$' . number_format((float)$monthlySummary['recaudacion'], 2, ',', '.')];
         $rows[] = ['Ocupación promedio', $monthlySummary['ocupacionPromedio'] . '%'];
     }
 
-    // ===== EVENTO EN CURSO =====
-    if ($currentNight) {
+    if ($currentNight !== null) {
         $rows[] = [];
         $rows[] = ['==== EVENTO EN CURSO ===='];
         $rows[] = ['Nombre', $currentNight['eventName']];
         $rows[] = ['Fecha', $currentNight['fecha']];
         $rows[] = ['Entradas', $currentNight['entradasVendidas']];
-        $rows[] = ['Recaudación', '$' . number_format($currentNight['recaudacion'], 2, ',', '.')];
+        $rows[] = ['Recaudación', '$' . number_format((float)$currentNight['recaudacion'], 2, ',', '.')];
         $rows[] = ['Ocupación', $currentNight['ocupacion'] . '%'];
     }
 
-    // ===== EVENTOS DEL MES =====
     $rows[] = [];
     $rows[] = ['==== EVENTOS DEL MES ===='];
     $rows[] = ['Nombre', 'Fecha', 'Entradas', 'Recaudación', 'Ocupación'];
@@ -56,14 +97,13 @@ function sendCsvExport(string $filename, array $metrics, ?array $monthlySummary,
     foreach ($pastEvents as $event) {
         $rows[] = [
             $event['name'],
-            substr($event['date'], 0, 10),
+            substr((string)$event['date'], 0, 10),
             $event['entradasVendidas'],
-            '$' . number_format($event['recaudacion'], 2, ',', '.'),
-            $event['ocupacion'] . '%'
+            '$' . number_format((float)$event['recaudacion'], 2, ',', '.'),
+            $event['ocupacion'] . '%',
         ];
     }
 
-    // ===== PRÓXIMOS EVENTOS =====
     if (!empty($upcomingEvents)) {
         $rows[] = [];
         $rows[] = ['==== PRÓXIMOS EVENTOS ===='];
@@ -72,25 +112,21 @@ function sendCsvExport(string $filename, array $metrics, ?array $monthlySummary,
         foreach ($upcomingEvents as $event) {
             $rows[] = [
                 $event['name'],
-                substr($event['date'], 0, 10),
-                '$' . number_format($event['recaudacion'], 2, ',', '.'),
-                $event['ocupacion'] . '%'
+                substr((string)$event['date'], 0, 10),
+                '$' . number_format((float)$event['recaudacion'], 2, ',', '.'),
+                $event['ocupacion'] . '%',
             ];
         }
     }
 
-    // EXPORT
-    $stream = fopen('php://temp', 'r+');
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+
+    $stream = fopen('php://output', 'w');
     foreach ($rows as $row) {
         fputcsv($stream, $row, ';');
     }
-
-    rewind($stream);
-    echo stream_get_contents($stream);
     fclose($stream);
-
-    header('Content-Type: text/csv; charset=utf-8');
-    header('Content-Disposition: attachment; filename="' . $filename . '"');
     exit;
 }
 
@@ -125,21 +161,31 @@ function buildSimplePdf(array $lines): string
 {
     $content = "BT\n/F1 16 Tf\n";
     $y = 770;
+
     foreach ($lines as $line) {
         if (function_exists('mb_convert_encoding')) {
             $converted = mb_convert_encoding($line, 'Windows-1252', 'UTF-8');
         } else {
             $converted = iconv('UTF-8', 'Windows-1252//TRANSLIT', $line);
         }
+
         if ($converted === false) {
             $converted = $line;
         }
-        $content .= sprintf("1 0 0 1 72 %.2f Tm\n(%s) Tj\n", $y, pdfEscape($converted));
+
+        $content .= sprintf(
+            "1 0 0 1 72 %.2f Tm\n(%s) Tj\n",
+            $y,
+            pdfEscape($converted)
+        );
+
         $y -= 22;
+
         if ($y < 72) {
             $y = 750;
         }
     }
+
     $content .= "ET\n";
 
     $objects = [];
@@ -151,6 +197,7 @@ function buildSimplePdf(array $lines): string
 
     $pdf = "%PDF-1.4\n";
     $offsets = [0];
+
     foreach ($objects as $object) {
         $offsets[] = strlen($pdf);
         $pdf .= $object . "\n";
@@ -159,60 +206,63 @@ function buildSimplePdf(array $lines): string
     $xrefPosition = strlen($pdf);
     $pdf .= "xref\n0 " . (count($objects) + 1) . "\n";
     $pdf .= "0000000000 65535 f \n";
+
     for ($i = 1; $i <= count($objects); $i++) {
         $pdf .= sprintf("%010d 00000 n \n", $offsets[$i]);
     }
+
     $pdf .= "trailer << /Size " . (count($objects) + 1) . " /Root 1 0 R >>\n";
     $pdf .= "startxref\n" . $xrefPosition . "\n%%EOF";
 
     return $pdf;
 }
 
-function sendPdfExport(string $filename, array $metrics, ?array $monthlySummary, array $pastEvents, ?array $currentNight): void
-{
+function sendPdfExport(
+    string $filename,
+    array $metrics,
+    ?array $monthlySummary,
+    array $pastEvents,
+    ?array $currentNight
+): void {
     $lines = [];
 
     $lines[] = '===== DASHBOARD SANTAS =====';
     $lines[] = '';
 
-    // RESUMEN
     $lines[] = '--- RESUMEN GENERAL ---';
     $lines[] = 'Eventos: ' . $metrics['eventosMes'];
     $lines[] = 'Entradas: ' . $metrics['entradasMes'];
     $lines[] = 'Escaneadas: ' . $metrics['entradasEscaneadas'];
-    $lines[] = 'Recaudación: $' . number_format($metrics['recaudacionMes'], 2, ',', '.');
-    $lines[] = 'Ocupación: ' . $metrics['ocupacionPromedio'] . '%';
+    $lines[] = 'Recaudacion: $' . number_format((float)$metrics['recaudacionMes'], 2, ',', '.');
+    $lines[] = 'Ocupacion: ' . $metrics['ocupacionPromedio'] . '%';
 
-    // RESUMEN MENSUAL
-    if ($monthlySummary) {
+    if ($monthlySummary !== null) {
         $lines[] = '';
         $lines[] = '--- RESUMEN MENSUAL ---';
         $lines[] = 'Mes: ' . $monthlySummary['monthLabel'];
         $lines[] = 'Eventos: ' . $monthlySummary['totalEventos'];
         $lines[] = 'Entradas: ' . $monthlySummary['totalEntradas'];
-        $lines[] = 'Recaudación: $' . number_format($monthlySummary['recaudacion'], 2, ',', '.');
+        $lines[] = 'Recaudacion: $' . number_format((float)$monthlySummary['recaudacion'], 2, ',', '.');
     }
 
-    // EVENTO ACTUAL
-    if ($currentNight) {
+    if ($currentNight !== null) {
         $lines[] = '';
         $lines[] = '--- EVENTO EN CURSO ---';
         $lines[] = $currentNight['eventName'];
         $lines[] = 'Entradas: ' . $currentNight['entradasVendidas'];
-        $lines[] = 'Ocupación: ' . $currentNight['ocupacion'] . '%';
+        $lines[] = 'Ocupacion: ' . $currentNight['ocupacion'] . '%';
     }
 
-    // EVENTOS
     $lines[] = '';
     $lines[] = '--- EVENTOS DEL MES ---';
 
     foreach ($pastEvents as $event) {
         $lines[] = sprintf(
             '%s | %s | %d entradas | $%s',
-            substr($event['date'], 0, 10),
+            substr((string)$event['date'], 0, 10),
             $event['name'],
-            $event['entradasVendidas'],
-            number_format($event['recaudacion'], 2, ',', '.')
+            (int)$event['entradasVendidas'],
+            number_format((float)$event['recaudacion'], 2, ',', '.')
         );
     }
 
@@ -224,7 +274,6 @@ function sendPdfExport(string $filename, array $metrics, ?array $monthlySummary,
     exit;
 }
 
-
 $host = "aws-1-us-east-2.pooler.supabase.com";
 $port = "5432";
 $dbname = "postgres";
@@ -232,359 +281,432 @@ $user = "postgres.kxvogvgsgwfvtmidabyp";
 $password = "lapicero30!";
 
 try {
-    $pdo = new PDO("pgsql:host=$host;port=$port;dbname=$dbname;user=$user;password=$password;sslmode=require");
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+    $globalStart = microtime(true);
 
     if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
-        http_response_code(405);
-        header("Content-Type: application/json; charset=utf-8");
-        echo json_encode(['error' => 'Método no permitido']);
-        exit;
+        sendJson(405, ['error' => 'Método no permitido']);
     }
 
-    // --- Parámetros ---
-    $dayParam   = $_GET['day']   ?? null;
+    $timer = microtime(true);
+    $pdo = new PDO(
+        "pgsql:host=$host;port=$port;dbname=$dbname;user=$user;password=$password;sslmode=require"
+    );
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+    logTime('PDO connect', $timer);
+
+    $dayParam   = $_GET['day'] ?? null;
     $monthParam = $_GET['month'] ?? null;
     $limitUp    = isset($_GET['limitUpcoming']) ? max(1, (int)$_GET['limitUpcoming']) : 3;
     $export     = $_GET['export'] ?? null;
 
-    // --- Rango mensual ---
-    if ($monthParam && preg_match('/^\d{4}-\d{2}$/', $monthParam)) {
-        [$y, $m] = explode('-', $monthParam);
-        $monthStart = "$y-$m-01";
-        $monthEnd   = date('Y-m-d', strtotime("$monthStart +1 month"));
+    if ($monthParam !== null && preg_match('/^\d{4}-\d{2}$/', $monthParam) === 1) {
+        [$year, $month] = explode('-', $monthParam);
+        $monthStartDate = sprintf('%04d-%02d-01', (int)$year, (int)$month);
     } else {
-        $monthStart = date('Y-m-01');
-        $monthEnd   = date('Y-m-d', strtotime("$monthStart +1 month"));
+        $monthStartDate = date('Y-m-01');
     }
 
-    // === 1. Métricas del mes ===
-    // Asegúrate de que todos los eventos del mes, ya cerrados o no, sean considerados.
-    $metricsSql = "
-    WITH event_stats AS (
+    $monthStart = $monthStartDate . ' 00:00:00';
+    $monthEnd = date('Y-m-d H:i:s', strtotime($monthStart . ' +1 month'));
+
+    $todayStart = date('Y-m-d 00:00:00');
+    $tomorrowStart = date('Y-m-d 00:00:00', strtotime('+1 day'));
+    $nowString = date('Y-m-d H:i:s');
+
+    $dayStart = null;
+    $dayEnd = null;
+
+    if ($dayParam !== null && preg_match('/^\d{4}-\d{2}-\d{2}$/', $dayParam) === 1) {
+        $dayStart = $dayParam . ' 00:00:00';
+        $dayEnd = date('Y-m-d H:i:s', strtotime($dayStart . ' +1 day'));
+    }
+
+    /*
+     |------------------------------------------------------------
+     | 1) Base mensual única
+     |------------------------------------------------------------
+     | De acá salen:
+     | - metrics
+     | - pastEvents
+     | - calendarEvents
+     | - monthlySummary
+     */
+    $timer = microtime(true);
+    $baseMonthlySql = "
         SELECT
             e.id,
+            e.nombre AS name,
+            TO_CHAR(e.fecha, 'YYYY-MM-DD HH24:MI:SS') AS date_text,
             e.fecha,
             e.capacidad,
-            COALESCE(ce.total_vendido, COALESCE(SUM(ve.cantidad), 0)) AS entradas,
-            COALESCE(ce.total_monto, COALESCE(SUM(ve.total), 0)) AS total,
+            e.activo,
+            COALESCE(ce.total_vendido, COALESCE(SUM(ve.cantidad), 0)) AS entradas_vendidas,
+            COALESCE(ce.total_monto, COALESCE(SUM(ve.total), 0)) AS recaudacion,
             COALESCE(
                 ce.porcentaje,
                 CASE
-                    WHEN e.capacidad > 0 THEN (COALESCE(SUM(ve.cantidad), 0) * 100.0) / e.capacidad
-                    ELSE NULL
+                    WHEN e.capacidad > 0
+                        THEN ROUND((COALESCE(SUM(ve.cantidad), 0) * 100.0) / e.capacidad)
+                    ELSE 0
                 END
-            ) AS ocupacion_evento
+            ) AS ocupacion,
+            CASE
+                WHEN ce.evento_id IS NOT NULL THEN TRUE
+                ELSE FALSE
+            END AS cerrado
         FROM eventos e
         LEFT JOIN ventas_entradas ve
-            ON e.id = ve.evento_id
+            ON ve.evento_id = e.id
             AND ve.estado IN ('comprada', 'usada')
-        LEFT JOIN cierres_eventos ce ON ce.evento_id = e.id
-        WHERE e.fecha >= :mstart::date AND e.fecha < :mend::date
-        GROUP BY e.id, e.fecha, e.capacidad, ce.total_vendido, ce.total_monto, ce.porcentaje
-    ),
-    daily_stats AS (
-        SELECT
-            DATE(fecha) AS dia,
-            AVG(ocupacion_evento) AS ocupacion
-        FROM event_stats
-        GROUP BY DATE(fecha)
-    )
-    SELECT
-        COUNT(*) AS eventos_mes,
-        COALESCE(SUM(entradas), 0) AS entradas_mes,
-        COALESCE(SUM(total), 0) AS recaudacion_mes,
-        (SELECT ROUND(AVG(ocupacion)) FROM daily_stats) AS ocupacion_promedio
-    FROM event_stats
+        LEFT JOIN cierres_eventos ce
+            ON ce.evento_id = e.id
+        WHERE e.fecha >= :mstart
+          AND e.fecha < :mend
+        GROUP BY
+            e.id,
+            e.nombre,
+            e.fecha,
+            e.capacidad,
+            e.activo,
+            ce.total_vendido,
+            ce.total_monto,
+            ce.porcentaje,
+            ce.evento_id
+        ORDER BY e.fecha ASC
     ";
 
+    $baseMonthlyStmt = $pdo->prepare($baseMonthlySql);
+    $baseMonthlyStmt->execute([
+        ':mstart' => $monthStart,
+        ':mend' => $monthEnd,
+    ]);
+    $monthlyRows = $baseMonthlyStmt->fetchAll() ?: [];
+    logTime('base mensual query', $timer);
 
-    $st = $pdo->prepare($metricsSql);
-    $st->execute([':mstart' => $monthStart, ':mend' => $monthEnd]);
-    $m = $st->fetch() ?: ['eventos_mes' => 0, 'entradas_mes' => 0, 'recaudacion_mes' => 0, 'ocupacion_promedio' => 0];
+    $timer = microtime(true);
+    $calendarEvents = [];
+    $pastEvents = [];
+
+    $eventosMes = 0;
+    $entradasMes = 0;
+    $recaudacionMes = 0.0;
+    $ocupacionSum = 0.0;
+    $ocupacionCount = 0;
+
+    foreach ($monthlyRows as $row) {
+        $eventDate = (string)$row['fecha'];
+
+        $calendarEvents[] = [
+            'id' => (string)$row['id'],
+            'name' => (string)$row['name'],
+            'date' => str_replace(' ', 'T', (string)$row['date_text']),
+            'entradasVendidas' => (int)$row['entradas_vendidas'],
+            'recaudacion' => (float)$row['recaudacion'],
+            'ocupacion' => (int)round((float)($row['ocupacion'] ?? 0)),
+            'activo' => (bool)$row['activo'],
+            'cerrado' => (bool)$row['cerrado'],
+        ];
+
+        $eventosMes++;
+        $entradasMes += (int)$row['entradas_vendidas'];
+        $recaudacionMes += (float)$row['recaudacion'];
+
+        if ($row['ocupacion'] !== null) {
+            $ocupacionSum += (float)$row['ocupacion'];
+            $ocupacionCount++;
+        }
+
+        $isPastOrClosed = ($eventDate < $nowString) || ((bool)$row['cerrado'] === true);
+
+        if ($dayStart !== null && $dayEnd !== null) {
+            if ($eventDate >= $dayStart && $eventDate < $dayEnd) {
+                $pastEvents[] = [
+                    'id' => (string)$row['id'],
+                    'name' => (string)$row['name'],
+                    'date' => str_replace(' ', 'T', (string)$row['date_text']),
+                    'entradasVendidas' => (int)$row['entradas_vendidas'],
+                    'recaudacion' => (float)$row['recaudacion'],
+                    'ocupacion' => (int)round((float)($row['ocupacion'] ?? 0)),
+                    'consumoPromedio' => 0,
+                    'barrasActivas' => 0,
+                    'mesasReservadas' => 0,
+                ];
+            }
+        } elseif ($isPastOrClosed) {
+            $pastEvents[] = [
+                'id' => (string)$row['id'],
+                'name' => (string)$row['name'],
+                'date' => str_replace(' ', 'T', (string)$row['date_text']),
+                'entradasVendidas' => (int)$row['entradas_vendidas'],
+                'recaudacion' => (float)$row['recaudacion'],
+                'ocupacion' => (int)round((float)($row['ocupacion'] ?? 0)),
+                'consumoPromedio' => 0,
+                'barrasActivas' => 0,
+                'mesasReservadas' => 0,
+            ];
+        }
+    }
+
+    usort(
+        $pastEvents,
+        static fn(array $a, array $b): int => strcmp((string)$b['date'], (string)$a['date'])
+    );
 
     $metrics = [
-        'eventosMes'        => (int)$m['eventos_mes'],
-        'entradasMes'       => (int)$m['entradas_mes'],
+        'eventosMes' => $eventosMes,
+        'entradasMes' => $entradasMes,
         'entradasEscaneadas' => 0,
-        'recaudacionMes'    => (float)$m['recaudacion_mes'],
-        'ocupacionPromedio' => $m['ocupacion_promedio'] !== null ? (int)$m['ocupacion_promedio'] : 0,
+        'recaudacionMes' => $recaudacionMes,
+        'ocupacionPromedio' => $ocupacionCount > 0 ? (int)round($ocupacionSum / $ocupacionCount) : 0,
     ];
 
-    $scannedStmt = $pdo->query("
+    $monthlySummary = [
+        'monthLabel' => getSpanishMonthLabel($monthStartDate),
+        'totalEventos' => $metrics['eventosMes'],
+        'totalEntradas' => $metrics['entradasMes'],
+        'recaudacion' => $metrics['recaudacionMes'],
+        'ocupacionPromedio' => $metrics['ocupacionPromedio'],
+        'mejorNoche' => null,
+    ];
+    logTime('base mensual armado PHP', $timer);
+
+    /*
+     |------------------------------------------------------------
+     | 2) Entradas escaneadas del mes
+     |------------------------------------------------------------
+     */
+    $timer = microtime(true);
+    $scannedSql = "
         SELECT COUNT(a.id) AS entradas_escaneadas
         FROM accesos_qr a
-        INNER JOIN ventas_entradas v ON v.id = a.venta_entrada_id
-        INNER JOIN eventos e ON e.id = v.evento_id
+        INNER JOIN ventas_entradas v
+            ON v.id = a.venta_entrada_id
+        INNER JOIN eventos e
+            ON e.id = v.evento_id
         WHERE a.resultado = 'valido'
-          AND e.activo = TRUE
-    ");
+          AND e.fecha >= :mstart
+          AND e.fecha < :mend
+    ";
+    $scannedStmt = $pdo->prepare($scannedSql);
+    $scannedStmt->execute([
+        ':mstart' => $monthStart,
+        ':mend' => $monthEnd,
+    ]);
     $scannedRow = $scannedStmt->fetch();
     $metrics['entradasEscaneadas'] = (int)($scannedRow['entradas_escaneadas'] ?? 0);
+    logTime('escaneadas', $timer);
 
-    // === 2. Noche en curso ===
+    /*
+     |------------------------------------------------------------
+     | 3) Evento en curso
+     |------------------------------------------------------------
+     */
+    $timer = microtime(true);
     $currentSql = "
-        SELECT e.id, e.nombre AS event_name,
+        SELECT
+            e.id,
+            e.nombre AS event_name,
             TO_CHAR(e.fecha, 'DD Mon YYYY') AS fecha_txt,
-            COALESCE(SUM(ve.cantidad),0) AS entradas_vendidas,
-            COALESCE(SUM(ve.total),0) AS recaudacion,
-            ROUND((COALESCE(SUM(ve.cantidad),0)*100.0)/NULLIF(e.capacidad,0)) AS ocupacion
+            COALESCE(SUM(ve.cantidad), 0) AS entradas_vendidas,
+            COALESCE(SUM(ve.total), 0) AS recaudacion,
+            CASE
+                WHEN e.capacidad > 0
+                    THEN ROUND((COALESCE(SUM(ve.cantidad), 0) * 100.0) / e.capacidad)
+                ELSE 0
+            END AS ocupacion
         FROM eventos e
         LEFT JOIN ventas_entradas ve
-        ON ve.evento_id = e.id
-        AND ve.estado IN ('comprada', 'usada')
-        WHERE DATE(e.fecha) = CURRENT_DATE
+            ON ve.evento_id = e.id
+            AND ve.estado IN ('comprada', 'usada')
+        WHERE e.fecha >= :todayStart
+          AND e.fecha < :tomorrowStart
         GROUP BY e.id, e.nombre, e.fecha, e.capacidad
         ORDER BY e.fecha DESC
         LIMIT 1
     ";
-    $currentNightRow = $pdo->query($currentSql)->fetch();
+    $currentStmt = $pdo->prepare($currentSql);
+    $currentStmt->execute([
+        ':todayStart' => $todayStart,
+        ':tomorrowStart' => $tomorrowStart,
+    ]);
+    $currentNightRow = $currentStmt->fetch();
+
     $currentNight = $currentNightRow ? [
-        'eventName'        => $currentNightRow['event_name'],
-        'fecha'            => $currentNightRow['fecha_txt'],
-        'horaInicio'       => '23:00',
-        'horaFinEstimada'  => '05:30',
+        'eventName' => (string)$currentNightRow['event_name'],
+        'fecha' => (string)$currentNightRow['fecha_txt'],
+        'horaInicio' => '23:00',
+        'horaFinEstimada' => '05:30',
         'entradasVendidas' => (int)$currentNightRow['entradas_vendidas'],
-        'recaudacion'      => (float)$currentNightRow['recaudacion'],
-        'ocupacion'        => (int)($currentNightRow['ocupacion'] ?? 0),
-        'consumoPromedio'  => 0,
-        'barrasActivas'    => 0,
-        'mesasReservadas'  => 0
-    ] : null;
-
-    // === 3. Próximos eventos ===
-    $upcomingSql = "
-    SELECT 
-        e.id,
-        e.nombre AS name,
-        TO_CHAR(e.fecha, 'YYYY-MM-DD HH24:MI:SS') AS date_text,
-        COALESCE(SUM(ve.total),0) AS recaudacion,
-        ROUND((COALESCE(SUM(ve.cantidad),0)*100.0)/NULLIF(e.capacidad,0)) AS ocupacion
-    FROM eventos e
-    LEFT JOIN ventas_entradas ve
-        ON ve.evento_id = e.id
-        AND ve.estado IN ('comprada', 'usada')
-    WHERE e.fecha > NOW() AND e.activo = TRUE
-    GROUP BY e.id, e.nombre, e.fecha, e.capacidad
-    ORDER BY e.fecha ASC
-    LIMIT :limitUp
-    ";
-    $up = $pdo->prepare($upcomingSql);
-    $up->bindValue(':limitUp', $limitUp, PDO::PARAM_INT);
-    $up->execute();
-
-    $upcomingEvents = array_map(function ($r) {
-        return [
-            'id'          => (string)$r['id'],
-            'name'        => $r['name'],        // ✅ ahora coincide con pastEvents
-            'date'        => str_replace(' ', 'T', $r['date_text']),
-            'recaudacion' => (float)$r['recaudacion'],
-            'ocupacion'   => (int)($r['ocupacion'] ?? 0)
-        ];
-    }, $up->fetchAll() ?: []);
-
-
-
-    // === 4. Eventos pasados ===
-    $params = [':mstart' => $monthStart, ':mend' => $monthEnd];
-    $whereParts = [
-        "DATE(e.fecha) >= :mstart::date",
-        "DATE(e.fecha) < :mend::date",
-        "(e.fecha < NOW() OR ce.evento_id IS NOT NULL)"
-    ];
-    if ($dayParam && preg_match('/^\d{4}-\d{2}-\d{2}$/', $dayParam)) {
-        $whereParts = ["DATE(e.fecha) = :day::date"];
-        $params = [':day' => $dayParam];
-    }
-
-    $where = implode(' AND ', $whereParts);
-
-    $pastSql = "
-        SELECT e.id,
-            e.nombre AS name,
-            TO_CHAR(e.fecha, 'YYYY-MM-DD HH24:MI:SS') AS date_text,
-            COALESCE(ce.total_vendido, COALESCE(SUM(ve.cantidad),0)) AS entradas_vendidas,
-            COALESCE(ce.total_monto, COALESCE(SUM(ve.total),0)) AS recaudacion,
-            COALESCE(
-                    ce.porcentaje,
-                    ROUND((COALESCE(SUM(ve.cantidad),0)*100.0)/NULLIF(e.capacidad,0))
-            ) AS ocupacion
-        FROM eventos e
-        LEFT JOIN ventas_entradas ve
-        ON ve.evento_id = e.id
-        AND ve.estado IN ('comprada', 'usada')
-        LEFT JOIN cierres_eventos ce ON ce.evento_id = e.id
-        WHERE $where
-        GROUP BY e.id, e.nombre, e.fecha, e.capacidad, ce.total_vendido, ce.total_monto, ce.porcentaje
-        ORDER BY e.fecha DESC
-    ";
-    $pst = $pdo->prepare($pastSql);
-    $pst->execute($params);
-    $pastEvents = array_map(fn($r) => [
-        'id' => (string)$r['id'],
-        'name' => $r['name'],
-        'date' => str_replace(' ', 'T', $r['date_text']),
-        'entradasVendidas' => (int)$r['entradas_vendidas'],
-        'recaudacion' => (float)$r['recaudacion'],
-        'ocupacion' => (int)($r['ocupacion'] ?? 0),
+        'recaudacion' => (float)$currentNightRow['recaudacion'],
+        'ocupacion' => (int)round((float)($currentNightRow['ocupacion'] ?? 0)),
         'consumoPromedio' => 0,
         'barrasActivas' => 0,
-        'mesasReservadas' => 0
-    ], $pst->fetchAll() ?: []);
+        'mesasReservadas' => 0,
+    ] : null;
+    logTime('currentNight', $timer);
 
-    $calendarStmt = $pdo->prepare("
-        SELECT e.id,
+    /*
+     |------------------------------------------------------------
+     | 4) Próximos eventos
+     |------------------------------------------------------------
+     */
+    $timer = microtime(true);
+    $upcomingSql = "
+        SELECT
+            e.id,
             e.nombre AS name,
             TO_CHAR(e.fecha, 'YYYY-MM-DD HH24:MI:SS') AS date_text,
-            COALESCE(ce.total_vendido, COALESCE(SUM(ve.cantidad),0)) AS entradas_vendidas,
-            COALESCE(ce.total_monto, COALESCE(SUM(ve.total),0)) AS recaudacion,
-            COALESCE(
-                    ce.porcentaje,
-                    ROUND((COALESCE(SUM(ve.cantidad),0)*100.0)/NULLIF(e.capacidad,0))
-            ) AS ocupacion,
-            e.activo AS activo,
-            CASE WHEN ce.evento_id IS NOT NULL THEN TRUE ELSE FALSE END AS cerrado
+            COALESCE(SUM(ve.total), 0) AS recaudacion,
+            CASE
+                WHEN e.capacidad > 0
+                    THEN ROUND((COALESCE(SUM(ve.cantidad), 0) * 100.0) / e.capacidad)
+                ELSE 0
+            END AS ocupacion
         FROM eventos e
         LEFT JOIN ventas_entradas ve
-        ON ve.evento_id = e.id
-        AND ve.estado IN ('comprada', 'usada')
-        LEFT JOIN cierres_eventos ce ON ce.evento_id = e.id
-        WHERE DATE(e.fecha) >= :mstart::date AND DATE(e.fecha) < :mend::date
-        GROUP BY e.id, e.nombre, e.fecha, e.capacidad, ce.total_vendido, ce.total_monto, ce.porcentaje, e.activo, ce.evento_id
+            ON ve.evento_id = e.id
+            AND ve.estado IN ('comprada', 'usada')
+        WHERE e.fecha > NOW()
+          AND e.activo = TRUE
+        GROUP BY e.id, e.nombre, e.fecha, e.capacidad
         ORDER BY e.fecha ASC
-    ");
-    $calendarStmt->execute([':mstart' => $monthStart, ':mend' => $monthEnd]);
-    $calendarEvents = array_map(fn($r) => [
-        'id' => (string)$r['id'],
-        'name' => $r['name'],
-        'date' => str_replace(' ', 'T', $r['date_text']),
-        'entradasVendidas' => (int)$r['entradas_vendidas'],
-        'recaudacion' => (float)$r['recaudacion'],
-        'ocupacion' => (int)($r['ocupacion'] ?? 0),
-        'activo' => filter_var($r['activo'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? false,
-        'cerrado' => filter_var($r['cerrado'], FILTER_VALIDATE_BOOLEAN)
-    ], $calendarStmt->fetchAll() ?: []);
+        LIMIT :limitUp
+    ";
+    $upcomingStmt = $pdo->prepare($upcomingSql);
+    $upcomingStmt->bindValue(':limitUp', $limitUp, PDO::PARAM_INT);
+    $upcomingStmt->execute();
 
-    // === 5. Resumen mensual ===
-    $monthlySql = "
-    WITH event_stats AS (
+    $upcomingEvents = array_map(
+        static fn(array $row): array => [
+            'id' => (string)$row['id'],
+            'name' => (string)$row['name'],
+            'date' => str_replace(' ', 'T', (string)$row['date_text']),
+            'recaudacion' => (float)$row['recaudacion'],
+            'ocupacion' => (int)round((float)($row['ocupacion'] ?? 0)),
+        ],
+        $upcomingStmt->fetchAll() ?: []
+    );
+    logTime('upcoming', $timer);
+
+    /*
+     |------------------------------------------------------------
+     | 5) Ventas + asistencia semanal en una sola query
+     |------------------------------------------------------------
+     */
+    $timer = microtime(true);
+    $weeklySql = "
+        SELECT
+            TO_CHAR(DATE_TRUNC('day', e.fecha), 'Dy') AS name,
+            DATE_TRUNC('day', e.fecha) AS dia_orden,
+            COALESCE(SUM(ve.total), 0) AS ventas,
+            COALESCE(SUM(ve.cantidad), 0) AS asistencia
+        FROM eventos e
+        LEFT JOIN ventas_entradas ve
+            ON ve.evento_id = e.id
+            AND ve.estado IN ('comprada', 'usada')
+        WHERE e.fecha >= NOW() - INTERVAL '7 day'
+        GROUP BY DATE_TRUNC('day', e.fecha)
+        ORDER BY dia_orden ASC
+    ";
+    $weeklyStmt = $pdo->query($weeklySql);
+    $weeklyRows = $weeklyStmt->fetchAll() ?: [];
+
+    $salesData = [];
+    $attendanceData = [];
+
+    foreach ($weeklyRows as $row) {
+        $name = trim((string)$row['name']);
+
+        $salesData[] = [
+            'name' => $name,
+            'ventas' => (float)$row['ventas'],
+        ];
+
+        $attendanceData[] = [
+            'name' => $name,
+            'asistencia' => (int)$row['asistencia'],
+        ];
+    }
+    logTime('weekly sales+attendance', $timer);
+
+    /*
+     |------------------------------------------------------------
+     | 6) Actividad reciente
+     |------------------------------------------------------------
+     */
+    $timer = microtime(true);
+    $recentSql = "
+        SELECT
+            e.nombre AS type,
+            TO_CHAR(e.fecha, 'DD Mon HH24:MI') AS time
+        FROM eventos e
+        ORDER BY e.fecha DESC
+        LIMIT 5
+    ";
+    $recentStmt = $pdo->query($recentSql);
+    $recentRows = $recentStmt->fetchAll() ?: [];
+
+    $recentActivity = [];
+    foreach ($recentRows as $index => $row) {
+        $recentActivity[] = [
+            'id' => $index + 1,
+            'type' => (string)$row['type'],
+            'description' => 'Evento registrado en el sistema.',
+            'time' => (string)$row['time'],
+            'color' => 'text-primary',
+        ];
+    }
+    logTime('recent', $timer);
+
+    /*
+     |------------------------------------------------------------
+     | 7) Distribución por evento en una sola query
+     |------------------------------------------------------------
+     */
+    $timer = microtime(true);
+    $categorySql = "
+        WITH totals AS (
             SELECT
-                e.id,
-                e.fecha,
-                e.capacidad,
-                COALESCE(ce.total_vendido, COALESCE(SUM(ve.cantidad), 0)) AS entradas,
-                COALESCE(ce.total_monto, COALESCE(SUM(ve.total), 0)) AS total,
-                COALESCE(
-                    ce.porcentaje,
-                    CASE
-                        WHEN e.capacidad > 0 THEN (COALESCE(SUM(ve.cantidad), 0) * 100.0) / e.capacidad
-                        ELSE NULL
-                    END
-                ) AS ocupacion_evento
+                e.nombre AS name,
+                COALESCE(SUM(ve.total), 0) AS total_evento
             FROM eventos e
             LEFT JOIN ventas_entradas ve
-            ON e.id = ve.evento_id
-            AND ve.estado IN ('comprada', 'usada')
-            LEFT JOIN cierres_eventos ce ON ce.evento_id = e.id
-            WHERE e.fecha >= :mstart::date AND e.fecha < :mend::date
-            GROUP BY e.id, e.fecha, e.capacidad, ce.total_vendido, ce.total_monto, ce.porcentaje
-        ),
-        daily_stats AS (
-            SELECT
-                DATE(fecha) AS dia,
-                AVG(ocupacion_evento) AS ocupacion
-            FROM event_stats
-            GROUP BY DATE(fecha)
+                ON ve.evento_id = e.id
+                AND ve.estado IN ('comprada', 'usada')
+            GROUP BY e.nombre
         )
-        SELECT TO_CHAR(:mstart::date, 'TMMonth YYYY') AS month_label,
-            COUNT(*) AS total_eventos,
-            COALESCE(SUM(entradas),0) AS total_entradas,
-            COALESCE(SUM(total),0) AS recaudacion,
-            (SELECT ROUND(AVG(ocupacion)) FROM daily_stats) AS ocupacion_promedio
-        FROM event_stats
-    ";
-    $ms = $pdo->prepare($monthlySql);
-    $ms->execute([':mstart' => $monthStart, ':mend' => $monthEnd]);
-    $mr = $ms->fetch();
-    $monthlySummary = $mr ? [
-        'monthLabel' => trim($mr['month_label']),
-        'totalEventos' => (int)$mr['total_eventos'],
-        'totalEntradas' => (int)$mr['total_entradas'],
-        'recaudacion' => (float)$mr['recaudacion'],
-        'ocupacionPromedio' => (int)($mr['ocupacion_promedio'] ?? 0),
-        'mejorNoche' => null
-    ] : null;
-
-    // === 6. Ventas semanales ===
-    $salesStmt = $pdo->query("
-        SELECT TO_CHAR(DATE(e.fecha),'Dy') AS name, COALESCE(SUM(ve.total),0) AS ventas
-        FROM eventos e
-        LEFT JOIN ventas_entradas ve
-            ON e.id = ve.evento_id
-            AND ve.estado IN ('comprada', 'usada')
-        WHERE e.fecha >= NOW() - INTERVAL '7 day'
-        GROUP BY 1 ORDER BY MIN(e.fecha)
-    ");
-    $salesData = array_map(fn($r) => ['name' => $r['name'], 'ventas' => (float)$r['ventas']], $salesStmt->fetchAll() ?: []);
-
-    // === 7. Asistencia semanal ===
-    $attendanceStmt = $pdo->query("
-        SELECT TO_CHAR(DATE(e.fecha),'Dy') AS name, COALESCE(SUM(ve.cantidad),0) AS asistencia
-        FROM eventos e
-        LEFT JOIN ventas_entradas ve
-            ON e.id = ve.evento_id
-            AND ve.estado IN ('comprada', 'usada')
-        WHERE e.fecha >= NOW() - INTERVAL '7 day'
-        GROUP BY 1 ORDER BY MIN(e.fecha)
-    ");
-    $attendanceData = array_map(fn($r) => ['name' => $r['name'], 'asistencia' => (int)$r['asistencia']], $attendanceStmt->fetchAll() ?: []);
-
-    // === 8. Actividad reciente ===
-    $recentStmt = $pdo->query("
-        SELECT e.nombre AS type, TO_CHAR(e.fecha,'DD Mon HH24:MI') AS time
-        FROM eventos e ORDER BY e.fecha DESC LIMIT 5
-    ");
-    $recentActivity = [];
-    foreach ($recentStmt->fetchAll() as $i => $r) {
-        $recentActivity[] = [
-            'id' => $i + 1,
-            'type' => $r['type'],
-            'description' => 'Evento registrado en el sistema.',
-            'time' => $r['time'],
-            'color' => 'text-primary'
-        ];
-    }
-
-    // === 9. Distribución por evento ===
-    $categoryStmt = $pdo->query("
-        SELECT e.nombre AS name,
-            ROUND((
-                COALESCE(SUM(ve.total),0) /
-                NULLIF((
-                    SELECT SUM(total)
-                    FROM ventas_entradas
-                    WHERE estado IN ('comprada', 'usada')
-                ),0)
-            ) * 100, 2) AS value
-        FROM eventos e
-        LEFT JOIN ventas_entradas ve
-        ON e.id = ve.evento_id
-        AND ve.estado IN ('comprada', 'usada')
-        GROUP BY e.nombre
-        ORDER BY value DESC
+        SELECT
+            name,
+            total_evento,
+            SUM(total_evento) OVER () AS total_general
+        FROM totals
+        ORDER BY total_evento DESC
         LIMIT 5
-    ");
+    ";
+    $categoryStmt = $pdo->query($categorySql);
+    $categoryRows = $categoryStmt->fetchAll() ?: [];
+
     $colors = ['#7C3AED', '#3B82F6', '#22C55E', '#EAB308', '#EF4444'];
     $categoryData = [];
-    foreach ($categoryStmt->fetchAll() as $i => $r) {
+
+    foreach ($categoryRows as $index => $row) {
+        $totalGeneral = (float)($row['total_general'] ?? 0);
+        $value = 0.0;
+
+        if ($totalGeneral > 0) {
+            $value = round((((float)$row['total_evento']) / $totalGeneral) * 100, 2);
+        }
+
         $categoryData[] = [
-            'name' => $r['name'],
-            'value' => (float)$r['value'],
-            'color' => $colors[$i % count($colors)]
+            'name' => (string)$row['name'],
+            'value' => $value,
+            'color' => $colors[$index % count($colors)],
         ];
     }
+    logTime('category data unica query', $timer);
 
+    $timer = microtime(true);
     $response = [
         'metrics' => $metrics,
         'currentNight' => $currentNight,
@@ -595,8 +717,9 @@ try {
         'salesData' => $salesData,
         'attendanceData' => $attendanceData,
         'categoryData' => $categoryData,
-        'recentActivity' => $recentActivity
+        'recentActivity' => $recentActivity,
     ];
+    logTime('response armado final', $timer);
 
     if ($export === 'csv') {
         sendCsvExport(
@@ -619,15 +742,12 @@ try {
         );
     }
 
-    // === Salida final ===
-    header("Content-Type: application/json; charset=utf-8");
-    echo json_encode($response, JSON_UNESCAPED_UNICODE);
+    logTime('TOTAL dashboard.php', $globalStart);
+    sendJson(200, $response);
 } catch (Throwable $e) {
-    http_response_code(500);
-    header("Content-Type: application/json; charset=utf-8");
-
-    echo json_encode([
+    error_log('dashboard.php ERROR: ' . $e->getMessage());
+    sendJson(500, [
         'error' => true,
-        'message' => 'Error interno del servidor'
+        'message' => 'Error interno del servidor',
     ]);
 }
