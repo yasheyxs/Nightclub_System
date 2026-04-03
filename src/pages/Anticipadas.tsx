@@ -31,7 +31,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-
 import {
   AlertDialog,
   AlertDialogAction,
@@ -79,18 +78,31 @@ interface EventoOption {
   fecha: string | null;
 }
 
+interface PromotorOptionResponse {
+  id: number;
+  nombre: string;
+  telefono?: string | null;
+  rol_nombre?: string | null;
+}
+
 interface VendedorOption {
-  id?: number | null;
   usuario_id: number;
   usuario_nombre: string;
   usuario_rol?: string | null;
-  es_promotor?: boolean;
-  evento_id: number;
-  entrada_id: number;
+  es_promotor: boolean;
+  evento_id: number | null;
+  entrada_id: number | null;
   cupo_total: number | null;
   cupo_vendido: number | null;
   cupo_disponible: number | null;
   tiene_cupo: boolean;
+}
+
+interface AnticipadasOptionsResponse {
+  success?: boolean;
+  entrada_anticipada?: EntradaOption | null;
+  eventos?: EventoOption[];
+  promotores?: PromotorOptionResponse[];
 }
 
 const normalizeEntradaName = (name: string) =>
@@ -108,29 +120,6 @@ const mapAnticipada = (item: AnticipadaResponse): AnticipadaItem => ({
   incluyeTrago: Boolean(item.incluye_trago),
   eventoNombre: item.evento_nombre ?? "—",
 });
-
-const parseJsonSafe = (value: string | null) => {
-  if (!value) return null;
-
-  try {
-    return JSON.parse(value);
-  } catch {
-    return null;
-  }
-};
-
-const extractNumericId = (value: unknown): number | null => {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-
-  if (typeof value === "string") {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : null;
-  }
-
-  return null;
-};
 
 const getLoggedUserId = (): number | null => {
   const candidates = [
@@ -156,7 +145,17 @@ const getLoggedUserId = (): number | null => {
     if (!raw) continue;
 
     try {
-      const data = JSON.parse(raw);
+      const data = JSON.parse(raw) as {
+        id?: number | string;
+        user_id?: number | string;
+        usuario_id?: number | string;
+        idUsuario?: number | string;
+        user?: {
+          id?: number | string;
+          user_id?: number | string;
+          usuario_id?: number | string;
+        };
+      };
 
       const nestedCandidates = [
         data?.id,
@@ -182,22 +181,21 @@ const getLoggedUserId = (): number | null => {
   return null;
 };
 
-export default function Anticipadas() {
+export default function Anticipadas(): JSX.Element {
   const [anticipadas, setAnticipadas] = useState<AnticipadaItem[]>([]);
   const [entradasAnticipadas, setEntradasAnticipadas] = useState<
     EntradaOption[]
   >([]);
   const [eventos, setEventos] = useState<EventoOption[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [optionsLoading, setOptionsLoading] = useState(true);
-  const [vendedoresLoading, setVendedoresLoading] = useState(false);
-  const [formOpen, setFormOpen] = useState(false);
-  const [creating, setCreating] = useState(false);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [optionsLoading, setOptionsLoading] = useState<boolean>(true);
+  const [formOpen, setFormOpen] = useState<boolean>(false);
+  const [creating, setCreating] = useState<boolean>(false);
   const [printingId, setPrintingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AnticipadaItem | null>(null);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [search, setSearch] = useState("");
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState<boolean>(false);
+  const [search, setSearch] = useState<string>("");
   const [vendedores, setVendedores] = useState<VendedorOption[]>([]);
   const [formData, setFormData] = useState({
     nombre: "",
@@ -209,7 +207,7 @@ export default function Anticipadas() {
     incluyeTrago: false,
   });
 
-  const resetForm = () => {
+  const resetForm = (): void => {
     setFormData((prev) => ({
       ...prev,
       nombre: "",
@@ -220,7 +218,7 @@ export default function Anticipadas() {
     }));
   };
 
-  const fetchAnticipadas = async () => {
+  const fetchAnticipadas = async (): Promise<void> => {
     setLoading(true);
 
     try {
@@ -239,54 +237,68 @@ export default function Anticipadas() {
     }
   };
 
-  const fetchOptions = async () => {
+  const fetchOptions = async (): Promise<void> => {
     setOptionsLoading(true);
 
     try {
-      const [entradasRes, eventosRes] = await Promise.all([
-        api.get("/entradas"),
-        api.get("/eventos?upcoming=1"),
-      ]);
+      const { data } = await api.get<AnticipadasOptionsResponse>(
+        "/anticipadas",
+        {
+          params: { accion: "opciones" },
+        },
+      );
 
-      const entradasData = Array.isArray(entradasRes.data)
-        ? entradasRes.data
-        : Array.isArray(entradasRes.data?.data)
-          ? entradasRes.data.data
-          : Array.isArray(entradasRes.data?.entradas)
-            ? entradasRes.data.entradas
-            : [];
+      const entradaAnticipada = data?.entrada_anticipada ?? null;
+      const eventosData = Array.isArray(data?.eventos) ? data.eventos : [];
+      const promotoresData = Array.isArray(data?.promotores)
+        ? data.promotores
+        : [];
 
-      const eventosData = Array.isArray(eventosRes.data)
-        ? eventosRes.data
-        : Array.isArray(eventosRes.data?.data)
-          ? eventosRes.data.data
-          : Array.isArray(eventosRes.data?.eventos)
-            ? eventosRes.data.eventos
-            : [];
+      const anticipadasOptions: EntradaOption[] =
+        entradaAnticipada &&
+        normalizeEntradaName(entradaAnticipada.nombre) === "anticipada"
+          ? [
+              {
+                id: Number(entradaAnticipada.id),
+                nombre: entradaAnticipada.nombre,
+                precio_base:
+                  entradaAnticipada.precio_base !== undefined &&
+                  entradaAnticipada.precio_base !== null
+                    ? Number(entradaAnticipada.precio_base)
+                    : null,
+              },
+            ]
+          : [];
 
-      const anticipadasOptions = entradasData
-        .map((entrada: EntradaOption) => ({
-          id: Number(entrada.id),
-          nombre: entrada.nombre,
-          precio_base:
-            entrada.precio_base !== undefined && entrada.precio_base !== null
-              ? Number(entrada.precio_base)
-              : null,
-        }))
-        .filter(
-          (entrada: EntradaOption) =>
-            normalizeEntradaName(entrada.nombre) === "anticipada",
-        );
-
-      setEntradasAnticipadas(anticipadasOptions);
-
-      const mappedEventos = eventosData.map((evento: EventoOption) => ({
+      const mappedEventos: EventoOption[] = eventosData.map((evento) => ({
         id: Number(evento.id),
         nombre: evento.nombre,
         fecha: evento.fecha ?? null,
       }));
 
+      const mappedVendedores: VendedorOption[] = promotoresData.map(
+        (promotor) => {
+          const rol = promotor.rol_nombre ?? null;
+          const rolNormalizado = (rol ?? "").trim().toLowerCase();
+
+          return {
+            usuario_id: Number(promotor.id),
+            usuario_nombre: promotor.nombre,
+            usuario_rol: rol,
+            es_promotor: ["promotor", "promoter"].includes(rolNormalizado),
+            evento_id: null,
+            entrada_id: anticipadasOptions[0]?.id ?? null,
+            cupo_total: null,
+            cupo_vendido: null,
+            cupo_disponible: null,
+            tiene_cupo: false,
+          };
+        },
+      );
+
+      setEntradasAnticipadas(anticipadasOptions);
       setEventos(mappedEventos);
+      setVendedores(mappedVendedores);
 
       setFormData((prev) => ({
         ...prev,
@@ -298,12 +310,17 @@ export default function Anticipadas() {
         eventoId:
           prev.eventoId ||
           (mappedEventos.length > 0 ? String(mappedEventos[0].id) : ""),
+        promotorId:
+          prev.promotorId ||
+          (mappedVendedores.length > 0
+            ? String(mappedVendedores[0].usuario_id)
+            : ""),
       }));
     } catch (error) {
       console.error("Error cargando opciones de anticipadas:", error);
       toast({
         title: "Error",
-        description: "No se pudieron cargar los eventos o entradas.",
+        description: "No se pudieron cargar las opciones de anticipadas.",
         variant: "destructive",
       });
     } finally {
@@ -311,72 +328,9 @@ export default function Anticipadas() {
     }
   };
 
-  const fetchVendedores = async (eventoId: string, entradaId: number) => {
-    if (!eventoId || !entradaId) {
-      setVendedores([]);
-      return;
-    }
-
-    setVendedoresLoading(true);
-
-    try {
-      const { data } = await api.get<VendedorOption[]>("/promotores_cupos", {
-        params: {
-          evento_id: Number(eventoId),
-          entrada_id: entradaId,
-        },
-      });
-
-      const vendedoresData = Array.isArray(data) ? data : [];
-      setVendedores(vendedoresData);
-
-      const usuarioLogueadoId = getLoggedUserId();
-
-      setFormData((prev) => {
-        if (vendedoresData.length === 0) {
-          return { ...prev, promotorId: "" };
-        }
-
-        if (
-          usuarioLogueadoId !== null &&
-          vendedoresData.some((v) => v.usuario_id === usuarioLogueadoId)
-        ) {
-          return {
-            ...prev,
-            promotorId: String(usuarioLogueadoId),
-          };
-        }
-
-        const currentId = Number(prev.promotorId);
-        const currentExists = vendedoresData.some(
-          (v) => v.usuario_id === currentId,
-        );
-
-        if (currentExists) {
-          return prev;
-        }
-
-        return {
-          ...prev,
-          promotorId: String(vendedoresData[0].usuario_id),
-        };
-      });
-    } catch (error) {
-      console.error("Error cargando vendedores:", error);
-      toast({
-        title: "Error",
-        description: "No se pudieron cargar los vendedores.",
-        variant: "destructive",
-      });
-      setVendedores([]);
-    } finally {
-      setVendedoresLoading(false);
-    }
-  };
-
   useEffect(() => {
-    fetchAnticipadas();
-    fetchOptions();
+    void fetchAnticipadas();
+    void fetchOptions();
   }, []);
 
   const selectedEntrada = entradasAnticipadas[0] ?? null;
@@ -385,15 +339,6 @@ export default function Anticipadas() {
     entradaPrice !== null
       ? Math.max(1, formData.cantidad) * entradaPrice
       : null;
-
-  useEffect(() => {
-    if (!formData.eventoId || !selectedEntrada?.id) {
-      setVendedores([]);
-      return;
-    }
-
-    fetchVendedores(formData.eventoId, selectedEntrada.id);
-  }, [formData.eventoId, selectedEntrada?.id]);
 
   const filteredAnticipadas = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -407,7 +352,7 @@ export default function Anticipadas() {
     );
   }, [anticipadas, search]);
 
-  const handlePrint = async (itemId: number) => {
+  const handlePrint = async (itemId: number): Promise<void> => {
     setPrintingId(itemId);
 
     interface PrintJob {
@@ -506,7 +451,7 @@ export default function Anticipadas() {
     }
   };
 
-  const handleCreate = async () => {
+  const handleCreate = async (): Promise<void> => {
     if (!formData.nombre.trim() || !formData.entradaId) {
       toast({
         title: "Datos incompletos",
@@ -566,7 +511,7 @@ export default function Anticipadas() {
 
         toast({
           title: "Anticipada registrada",
-          description: data?.mensaje ?? "Se agregó al listado.",
+          description: (data?.mensaje as string) ?? "Se agregó al listado.",
         });
 
         resetForm();
@@ -589,7 +534,7 @@ export default function Anticipadas() {
     }
   };
 
-  const handleDelete = async () => {
+  const handleDelete = async (): Promise<void> => {
     if (!deleteTarget) return;
 
     setDeletingId(deleteTarget.id);
@@ -648,8 +593,6 @@ export default function Anticipadas() {
 
             if (!isOpen) {
               resetForm();
-            } else if (formData.eventoId && selectedEntrada?.id) {
-              fetchVendedores(formData.eventoId, selectedEntrada.id);
             }
           }}
         >
@@ -758,7 +701,6 @@ export default function Anticipadas() {
                       setFormData({
                         ...formData,
                         eventoId: value === "none" ? "" : value,
-                        promotorId: "",
                       })
                     }
                     disabled={optionsLoading}
@@ -798,7 +740,7 @@ export default function Anticipadas() {
                         promotorId: value,
                       })
                     }
-                    disabled={vendedoresLoading || vendedores.length === 0}
+                    disabled={optionsLoading || vendedores.length === 0}
                   >
                     <SelectTrigger className="h-11">
                       <SelectValue placeholder="Seleccioná un vendedor" />
@@ -944,7 +886,9 @@ export default function Anticipadas() {
                             size="sm"
                             variant="secondary"
                             disabled={printingId === item.id}
-                            onClick={() => handlePrint(item.id)}
+                            onClick={() => {
+                              void handlePrint(item.id);
+                            }}
                           >
                             {printingId === item.id ? (
                               <Loader2 className="h-4 w-4 animate-spin" />
@@ -1003,7 +947,9 @@ export default function Anticipadas() {
             </AlertDialogCancel>
 
             <AlertDialogAction
-              onClick={handleDelete}
+              onClick={() => {
+                void handleDelete();
+              }}
               disabled={deletingId !== null}
             >
               {deletingId !== null ? (
