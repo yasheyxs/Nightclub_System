@@ -391,7 +391,7 @@ try {
     $whereParts = [
         "DATE(e.fecha) >= :mstart::date",
         "DATE(e.fecha) < :mend::date",
-        "e.fecha < NOW()"
+        "(e.fecha < NOW() OR ce.evento_id IS NOT NULL)"
     ];
     if ($dayParam && preg_match('/^\d{4}-\d{2}-\d{2}$/', $dayParam)) {
         $whereParts = ["DATE(e.fecha) = :day::date"];

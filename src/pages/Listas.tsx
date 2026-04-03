@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { api } from "@/services/api";
+import axios, { AxiosError } from "axios";
 
 interface Guest {
   id: string;
@@ -256,29 +257,78 @@ export default function Listas() {
 
   const handlePrintGuest = async (guest: Guest) => {
     setPrintingGuestId(guest.id);
+
     try {
       const payload = {
         nombre: guest.fullName || "Invitado de lista",
         lista: selectedUser?.name ?? "Lista",
-        documento: guest.document ?? "",
+        dni: guest.document ?? "",
+        usuario_id: selectedUser?.id ? Number(selectedUser.id) : null,
       };
 
-      const { data } = await api.post("/imprimir_ticket_gratis", payload);
+      const { data } = await api.post("/imprimir_ticket_gratis.php", payload);
 
-      const mensaje =
-        typeof data?.mensaje === "string"
-          ? data.mensaje
-          : "Ticket gratuito enviado a la impresora.";
+      if (!data?.ok) {
+        throw new Error(data?.error || "No se pudo registrar la cortesía.");
+      }
+
+      const tickets = Array.isArray(data?.print_jobs) ? data.print_jobs : [];
+
+      if (!tickets.length) {
+        throw new Error("El backend no devolvió tickets para imprimir.");
+      }
+
+      const printResponse = await fetch("http://localhost:3001/print", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ tickets }),
+      });
+
+      const printData = await printResponse.json().catch(() => null);
+
+      if (!printResponse.ok || !printData?.ok) {
+        throw new Error(
+          printData?.error || "La ticketera no pudo imprimir el ticket.",
+        );
+      }
 
       toast({
-        title: "Impresión de ticket",
-        description: mensaje,
+        title: "Impresión correcta",
+        description:
+          typeof printData?.mensaje === "string"
+            ? printData.mensaje
+            : "Ticket enviado a impresión.",
       });
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("Error al imprimir ticket de lista:", error);
+
+      let errorMessage = "Reintentá en unos segundos.";
+
+      if (axios.isAxiosError(error)) {
+        const axiosError = error as AxiosError<{
+          ok?: boolean;
+          error?: string;
+          details?: string;
+          recovery?: string;
+        }>;
+
+        console.error("Status:", axiosError.response?.status);
+        console.error("Data:", axiosError.response?.data);
+
+        errorMessage =
+          axiosError.response?.data?.error ??
+          axiosError.response?.data?.details ??
+          axiosError.message ??
+          errorMessage;
+      } else if (error instanceof Error) {
+        errorMessage = error.message;
+      }
+
       toast({
         title: "No se pudo imprimir",
-        description: "Reintentá en unos segundos.",
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {

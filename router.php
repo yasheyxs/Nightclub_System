@@ -64,6 +64,11 @@ switch ($uriPath) {
         require __DIR__ . '/api/listas.php';
         exit;
 
+    case '/api/imprimir_ticket_gratis':
+    case '/api/imprimir_ticket_gratis.php':
+        require __DIR__ . '/api/imprimir_ticket_gratis.php';
+        exit;
+
     case '/api/roles':
     case '/api/roles.php':
         require __DIR__ . '/api/roles.php';
