@@ -72,6 +72,43 @@ function obtenerTextoTrago(bool $incluyeTrago): string
     return $incluyeTrago ? 'INCLUYE TRAGO GRATIS' : '';
 }
 
+function eventoEstaCerrado(PDO $pdo, int $eventoId): bool
+{
+    $stmt = $pdo->prepare("
+        SELECT 1
+        FROM cierres_eventos
+        WHERE evento_id = :evento_id
+        LIMIT 1
+    ");
+    $stmt->execute([':evento_id' => $eventoId]);
+    return (bool)$stmt->fetchColumn();
+}
+
+function obtenerEventoParaVenta(PDO $pdo, int $eventoId): ?array
+{
+    $stmt = $pdo->prepare("
+        SELECT id, nombre, capacidad, activo
+        FROM eventos
+        WHERE id = :id
+        LIMIT 1
+    ");
+    $stmt->execute([':id' => $eventoId]);
+    $evento = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$evento) {
+        return null;
+    }
+
+    if (!filter_var($evento['activo'], FILTER_VALIDATE_BOOLEAN)) {
+        return null;
+    }
+
+    if (eventoEstaCerrado($pdo, (int)$evento['id'])) {
+        return null;
+    }
+
+    return $evento;
+}
+
 // ======================================
 // MAIN
 // ======================================
@@ -80,7 +117,17 @@ try {
 
     if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         jsonResponse(200, [
-            'eventos' => $pdo->query("SELECT * FROM eventos")->fetchAll(PDO::FETCH_ASSOC),
+            'eventos' => $pdo->query("
+                SELECT e.*
+                FROM eventos e
+                WHERE e.activo = true
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM cierres_eventos ce
+                      WHERE ce.evento_id = e.id
+                  )
+                ORDER BY e.fecha ASC
+            ")->fetchAll(PDO::FETCH_ASSOC),
             'entradas' => $pdo->query("SELECT * FROM entradas")->fetchAll(PDO::FETCH_ASSOC),
             'ventas' => $pdo->query("
                 SELECT evento_id, entrada_id, SUM(cantidad) AS total_vendido
@@ -105,6 +152,94 @@ try {
             ]);
         }
 
+        $evento = obtenerEventoParaVenta($pdo, $eventoId);
+        if (!$evento) {
+            jsonResponse(404, [
+                'ok' => false,
+                'error' => 'El evento no existe, está inactivo o ya fue cerrado.',
+            ]);
+        }
+
+        $pdo->beginTransaction();
+        try {
+            if (eventoEstaCerrado($pdo, $eventoId)) {
+                $pdo->rollBack();
+                jsonResponse(409, [
+                    'ok' => false,
+                    'error' => 'El evento ya está cerrado.',
+                ]);
+            }
+
+            $totalesStmt = $pdo->prepare("
+                SELECT
+                    COALESCE(SUM(CASE WHEN estado IN ('comprada', 'usada') THEN cantidad ELSE 0 END), 0) AS total_vendido,
+                    COALESCE(SUM(CASE WHEN estado IN ('comprada', 'usada') THEN COALESCE(total, precio_unitario * cantidad) ELSE 0 END), 0) AS total_monto
+                FROM ventas_entradas
+                WHERE evento_id = :evento_id
+            ");
+            $totalesStmt->execute([':evento_id' => $eventoId]);
+            $totales = $totalesStmt->fetch(PDO::FETCH_ASSOC) ?: ['total_vendido' => 0, 'total_monto' => 0];
+
+            $detalleStmt = $pdo->prepare("
+                SELECT
+                    ve.entrada_id,
+                    COALESCE(en.nombre, CONCAT('Entrada ', ve.entrada_id::text)) AS entrada_nombre,
+                    COALESCE(SUM(ve.cantidad), 0) AS cantidad,
+                    COALESCE(SUM(COALESCE(ve.total, ve.precio_unitario * ve.cantidad)), 0) AS monto
+                FROM ventas_entradas ve
+                LEFT JOIN entradas en ON en.id = ve.entrada_id
+                WHERE ve.evento_id = :evento_id
+                  AND ve.estado IN ('comprada', 'usada')
+                GROUP BY ve.entrada_id, entrada_nombre
+                ORDER BY entrada_nombre ASC
+            ");
+            $detalleStmt->execute([':evento_id' => $eventoId]);
+            $detalle = $detalleStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+            $capacidad = (int)($evento['capacidad'] ?? 0);
+            $totalVendido = (int)($totales['total_vendido'] ?? 0);
+            $porcentaje = $capacidad > 0 ? round(($totalVendido * 100) / $capacidad, 2) : null;
+
+            $cierreStmt = $pdo->prepare("
+                INSERT INTO cierres_eventos (
+                    evento_id,
+                    evento_nombre,
+                    total_vendido,
+                    total_monto,
+                    capacidad,
+                    porcentaje,
+                    detalle,
+                    fecha_cierre
+                )
+                VALUES (
+                    :evento_id,
+                    :evento_nombre,
+                    :total_vendido,
+                    :total_monto,
+                    :capacidad,
+                    :porcentaje,
+                    :detalle::jsonb,
+                    NOW()
+                )
+            ");
+            $cierreStmt->execute([
+                ':evento_id' => $eventoId,
+                ':evento_nombre' => (string)$evento['nombre'],
+                ':total_vendido' => $totalVendido,
+                ':total_monto' => (float)($totales['total_monto'] ?? 0),
+                ':capacidad' => $capacidad,
+                ':porcentaje' => $porcentaje,
+                ':detalle' => json_encode($detalle, JSON_UNESCAPED_UNICODE),
+            ]);
+
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+
         jsonResponse(200, [
             'ok' => true,
             'mensaje' => 'Evento cerrado correctamente',
@@ -121,6 +256,13 @@ try {
         jsonResponse(400, [
             'ok' => false,
             'error' => 'Datos inválidos',
+        ]);
+    }
+
+    if (!obtenerEventoParaVenta($pdo, $eventoId)) {
+        jsonResponse(409, [
+            'ok' => false,
+            'error' => 'No se puede vender: el evento no existe, está inactivo o ya fue cerrado.',
         ]);
     }
 

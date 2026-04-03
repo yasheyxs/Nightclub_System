@@ -122,6 +122,18 @@ try {
         ];
     }
 
+    function evento_esta_cerrado(PDO $pdo, int $eventoId): bool
+    {
+        $stmt = $pdo->prepare("
+            SELECT 1
+            FROM cierres_eventos
+            WHERE evento_id = :evento_id
+            LIMIT 1
+        ");
+        $stmt->execute([':evento_id' => $eventoId]);
+        return (bool)$stmt->fetchColumn();
+    }
+
     desactivar_eventos_pasados($pdo);
 
     // ===========================================================
@@ -148,6 +160,11 @@ try {
                 FROM eventos
                 WHERE fecha::date BETWEEN :desde AND :hasta
                 AND activo = true
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM cierres_eventos ce
+                    WHERE ce.evento_id = eventos.id
+                )
                 ORDER BY fecha ASC
             ");
             $stmt->execute([':desde' => $desde, ':hasta' => $hasta]);
@@ -160,7 +177,13 @@ try {
         $stmt = $pdo->query("
             SELECT id, nombre, detalle, fecha, capacidad, activo
             FROM eventos
-            WHERE activo = true AND fecha >= NOW()
+            WHERE activo = true
+              AND fecha >= NOW()
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM cierres_eventos ce
+                  WHERE ce.evento_id = eventos.id
+              )
             ORDER BY fecha ASC
         ");
         echo json_encode(array_map('map_event', $stmt->fetchAll(PDO::FETCH_ASSOC)));
@@ -201,6 +224,12 @@ try {
         $id = (int) $_GET['id'];
         $input = json_decode(file_get_contents("php://input"), true);
 
+        if (evento_esta_cerrado($pdo, $id)) {
+            http_response_code(409);
+            echo json_encode(["error" => "El evento está cerrado y no puede editarse."]);
+            exit;
+        }
+
         $stmt = $pdo->prepare("
             UPDATE eventos
             SET
@@ -228,6 +257,13 @@ try {
             exit;
         }
         $id = (int)$_GET['id'];
+
+        if (evento_esta_cerrado($pdo, $id)) {
+            http_response_code(409);
+            echo json_encode(["error" => "El evento está cerrado y no puede modificarse."]);
+            exit;
+        }
+
         $pdo->prepare("UPDATE eventos SET activo = false WHERE id = :id")->execute([':id' => $id]);
         echo json_encode(["success" => true]);
         exit;
