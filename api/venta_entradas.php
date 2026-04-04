@@ -58,6 +58,24 @@ function generarQrHash(string $qr): string
     return hash('sha256', $qr);
 }
 
+function generarQrUnico(PDO $pdo): string
+{
+    $checkQrStmt = $pdo->prepare("
+        SELECT 1
+        FROM ventas_entradas
+        WHERE qr_codigo = :qr_codigo
+        LIMIT 1
+    ");
+
+    do {
+        $qrCodigo = generarQrCodigo();
+        $checkQrStmt->execute([':qr_codigo' => $qrCodigo]);
+        $existeQr = (bool)$checkQrStmt->fetchColumn();
+    } while ($existeQr);
+
+    return $qrCodigo;
+}
+
 function obtenerTextoTrago(bool $incluyeTrago): string
 {
     return $incluyeTrago ? 'INCLUYE TRAGO GRATIS' : '';
@@ -339,7 +357,7 @@ try {
         $timerVentas = microtime(true);
 
         for ($i = 0; $i < $cantidad; $i++) {
-            $qr = generarQrCodigo();
+            $qr = generarQrUnico($pdo);
             $hash = generarQrHash($qr);
 
             $insertStmt->bindValue(':entrada_id', $entradaId, PDO::PARAM_INT);

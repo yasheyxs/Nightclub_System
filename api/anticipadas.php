@@ -58,6 +58,24 @@ function generarQrCodigo(): string
     return strtoupper(bin2hex(random_bytes(16)));
 }
 
+function generarQrUnico(PDO $pdo): string
+{
+    $checkQrStmt = $pdo->prepare("
+        SELECT 1
+        FROM ventas_entradas
+        WHERE qr_codigo = :qr_codigo
+        LIMIT 1
+    ");
+
+    do {
+        $qrCodigo = generarQrCodigo();
+        $checkQrStmt->execute([':qr_codigo' => $qrCodigo]);
+        $existeQr = (bool)$checkQrStmt->fetchColumn();
+    } while ($existeQr);
+
+    return $qrCodigo;
+}
+
 function formatearFechaEvento(?string $fecha): ?string
 {
     if ($fecha === null || trim($fecha) === '') {
@@ -498,6 +516,7 @@ try {
                 v.entrada_id,
                 v.evento_id,
                 v.usuario_id,
+                v.promotor_id,
                 v.cantidad,
                 v.incluye_trago,
                 v.qr_codigo,
@@ -531,49 +550,103 @@ try {
         $usuarioId = isset($anticipada['usuario_id']) ? (int)$anticipada['usuario_id'] : null;
         $eventoFecha = formatearFechaEvento($anticipada['evento_fecha'] ?? null);
 
-        $qrCodigo = trim((string)($anticipada['qr_codigo'] ?? ''));
+        $timer = microtime(true);
+        $printJobs = [];
+        $ticketIds = [];
+        $qrCodigos = [];
 
-        if ($qrCodigo === '') {
-            $timer = microtime(true);
-            do {
-                $qrCodigo = generarQrCodigo();
-
-                $checkQrStmt = $pdo->prepare("
-                    SELECT 1
-                    FROM ventas_entradas
-                    WHERE qr_codigo = :qr_codigo
-                    LIMIT 1
-                ");
-                $checkQrStmt->execute([':qr_codigo' => $qrCodigo]);
-                $existeQr = (bool)$checkQrStmt->fetchColumn();
-            } while ($existeQr);
-            logTime('imprimir generar qr unico', $timer);
-
-            $qrHash = generarQrHash($qrCodigo);
-
-            $timer = microtime(true);
-            $updateStmt = $pdo->prepare("
+        $pdo->beginTransaction();
+        try {
+            $insertCopiaStmt = $pdo->prepare("
+                INSERT INTO ventas_entradas (
+                    entrada_id,
+                    cantidad,
+                    precio_unitario,
+                    evento_id,
+                    incluye_trago,
+                    usuario_id,
+                    estado,
+                    nombre,
+                    dni,
+                    promotor_id,
+                    qr_codigo,
+                    qr_hash,
+                    qr_generado_at
+                )
+                VALUES (
+                    :entrada_id,
+                    1,
+                    :precio_unitario,
+                    :evento_id,
+                    :incluye_trago,
+                    :usuario_id,
+                    'comprada',
+                    :nombre,
+                    :dni,
+                    :promotor_id,
+                    :qr_codigo,
+                    :qr_hash,
+                    NOW()
+                )
+                RETURNING id
+            ");
+            $updateOriginalStmt = $pdo->prepare("
                 UPDATE ventas_entradas
                 SET
+                    cantidad = 1,
                     qr_codigo = :qr_codigo,
                     qr_hash = :qr_hash,
                     qr_generado_at = NOW()
                 WHERE id = :id
             ");
-            $updateStmt->execute([
-                ':qr_codigo' => $qrCodigo,
-                ':qr_hash' => $qrHash,
-                ':id' => $id,
-            ]);
-            logTime('imprimir actualizar qr', $timer);
-        }
 
-        $timer = microtime(true);
-        $printJobs = [];
+            for ($i = 0; $i < $cantidad; $i++) {
+                $qrCodigo = generarQrUnico($pdo);
+                $qrHash = generarQrHash($qrCodigo);
+
+                if ($i === 0) {
+                    $updateOriginalStmt->execute([
+                        ':id' => $id,
+                        ':qr_codigo' => $qrCodigo,
+                        ':qr_hash' => $qrHash,
+                    ]);
+                    $ticketIds[] = (int)$anticipada['id'];
+                    $qrCodigos[] = $qrCodigo;
+                    continue;
+                }
+
+                $insertCopiaStmt->execute([
+                    ':entrada_id' => $entradaId,
+                    ':precio_unitario' => $precio,
+                    ':evento_id' => $eventoId,
+                    ':incluye_trago' => $incluyeTrago,
+                    ':usuario_id' => $usuarioId,
+                    ':nombre' => (string)($anticipada['nombre'] ?? ''),
+                    ':dni' => ($anticipada['dni'] ?? null) !== null && trim((string)$anticipada['dni']) !== ''
+                        ? (string)$anticipada['dni']
+                        : null,
+                    ':promotor_id' => ($anticipada['promotor_id'] ?? null) !== null
+                        ? (int)$anticipada['promotor_id']
+                        : null,
+                    ':qr_codigo' => $qrCodigo,
+                    ':qr_hash' => $qrHash,
+                ]);
+                $ticketIds[] = (int)$insertCopiaStmt->fetchColumn();
+                $qrCodigos[] = $qrCodigo;
+            }
+
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+        logTime('imprimir generar qr por entrada', $timer);
 
         for ($i = 0; $i < $cantidad; $i++) {
             $printJobs[] = [
-                'ticket_id' => (int)$anticipada['id'],
+                'ticket_id' => $ticketIds[$i] ?? (int)$anticipada['id'],
                 'evento_id' => $eventoId,
                 'entrada_id' => $entradaId,
                 'usuario_id' => $usuarioId,
@@ -582,7 +655,7 @@ try {
                 'precio_formateado' => number_format($precio, 0, ',', '.'),
                 'incluye_trago' => $incluyeTrago,
                 'trago_texto' => obtenerTextoTrago($incluyeTrago),
-                'qr' => $qrCodigo,
+                'qr' => $qrCodigos[$i] ?? '',
                 'estado' => 'comprada',
                 'fecha' => date('d/m/Y'),
                 'hora' => date('H:i'),
