@@ -438,8 +438,21 @@ export default function Anticipadas(): JSX.Element {
     } catch (error) {
       console.error("Error al imprimir anticipada:", error);
 
+      const axiosError = error as {
+        message?: string;
+        response?: {
+          data?: {
+            error?: string;
+            detalle?: string;
+          };
+        };
+      };
+
       const message =
-        error instanceof Error ? error.message : "Reintentá en unos segundos.";
+        axiosError.response?.data?.detalle ||
+        axiosError.response?.data?.error ||
+        axiosError.message ||
+        "Reintentá en unos segundos.";
 
       toast({
         title: "No se pudo imprimir",

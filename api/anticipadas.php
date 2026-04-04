@@ -278,7 +278,13 @@ try {
             : (int)$input['evento_id'];
         $dni = trim((string)($input['dni'] ?? ''));
         $cantidad = isset($input['cantidad']) ? max(1, (int)$input['cantidad']) : 1;
-        $incluyeTrago = normalizeBool($input['incluye_trago'] ?? false);
+        $incluyeTrago = filter_var(
+            $input['incluye_trago'] ?? false,
+            FILTER_VALIDATE_BOOLEAN,
+            FILTER_NULL_ON_FAILURE
+        );
+
+        $incluyeTrago = $incluyeTrago ?? false;
         $promotorId = isset($input['promotor_id']) && $input['promotor_id'] !== ''
             ? (int)$input['promotor_id']
             : null;
@@ -544,7 +550,11 @@ try {
         $nombreEntrada = trim((string)($anticipada['entrada_nombre'] ?? 'Anticipada'));
         $precio = isset($anticipada['entrada_precio']) ? (float)$anticipada['entrada_precio'] : 0.0;
         $cantidad = max(1, (int)($anticipada['cantidad'] ?? 1));
-        $incluyeTrago = filter_var($anticipada['incluye_trago'], FILTER_VALIDATE_BOOLEAN);
+        $incluyeTrago = filter_var(
+            $anticipada['incluye_trago'] ?? false,
+            FILTER_VALIDATE_BOOLEAN,
+            FILTER_NULL_ON_FAILURE
+        ) ?? false;
         $eventoId = isset($anticipada['evento_id']) ? (int)$anticipada['evento_id'] : null;
         $entradaId = isset($anticipada['entrada_id']) ? (int)$anticipada['entrada_id'] : null;
         $usuarioId = isset($anticipada['usuario_id']) ? (int)$anticipada['usuario_id'] : null;
@@ -615,22 +625,34 @@ try {
                     continue;
                 }
 
-                $insertCopiaStmt->execute([
-                    ':entrada_id' => $entradaId,
-                    ':precio_unitario' => $precio,
-                    ':evento_id' => $eventoId,
-                    ':incluye_trago' => $incluyeTrago,
-                    ':usuario_id' => $usuarioId,
-                    ':nombre' => (string)($anticipada['nombre'] ?? ''),
-                    ':dni' => ($anticipada['dni'] ?? null) !== null && trim((string)$anticipada['dni']) !== ''
+                $insertCopiaStmt->bindValue(':entrada_id', $entradaId, PDO::PARAM_INT);
+                $insertCopiaStmt->bindValue(':precio_unitario', $precio);
+                $insertCopiaStmt->bindValue(':evento_id', $eventoId, $eventoId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+                $insertCopiaStmt->bindValue(':incluye_trago', $incluyeTrago ? true : false, PDO::PARAM_BOOL);
+                $insertCopiaStmt->bindValue(':usuario_id', $usuarioId, $usuarioId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
+                $insertCopiaStmt->bindValue(':nombre', (string)($anticipada['nombre'] ?? ''), PDO::PARAM_STR);
+                $insertCopiaStmt->bindValue(
+                    ':dni',
+                    (($anticipada['dni'] ?? null) !== null && trim((string)$anticipada['dni']) !== '')
                         ? (string)$anticipada['dni']
                         : null,
-                    ':promotor_id' => ($anticipada['promotor_id'] ?? null) !== null
+                    (($anticipada['dni'] ?? null) !== null && trim((string)$anticipada['dni']) !== '')
+                        ? PDO::PARAM_STR
+                        : PDO::PARAM_NULL
+                );
+                $insertCopiaStmt->bindValue(
+                    ':promotor_id',
+                    ($anticipada['promotor_id'] ?? null) !== null
                         ? (int)$anticipada['promotor_id']
                         : null,
-                    ':qr_codigo' => $qrCodigo,
-                    ':qr_hash' => $qrHash,
-                ]);
+                    ($anticipada['promotor_id'] ?? null) !== null
+                        ? PDO::PARAM_INT
+                        : PDO::PARAM_NULL
+                );
+                $insertCopiaStmt->bindValue(':qr_codigo', $qrCodigo, PDO::PARAM_STR);
+                $insertCopiaStmt->bindValue(':qr_hash', $qrHash, PDO::PARAM_STR);
+
+                $insertCopiaStmt->execute();
                 $ticketIds[] = (int)$insertCopiaStmt->fetchColumn();
                 $qrCodigos[] = $qrCodigo;
             }
