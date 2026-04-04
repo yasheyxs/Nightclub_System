@@ -11,8 +11,45 @@ interface ValidarQrResponse {
   resultado?: ResultadoQr;
   mensaje?: string;
   entradas_escaneadas?: number;
+  data?: {
+    evento_id?: number | null;
+  };
   error?: string;
   details?: string;
+}
+
+interface VentaEntradasResponse {
+  eventos?: Array<{
+    id: number;
+  }>;
+}
+
+const QR_COUNTERS_STORAGE_KEY = "qr_scanner_counts_by_event";
+
+function readQrCounters(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(QR_COUNTERS_STORAGE_KEY);
+    if (!raw) return {};
+
+    const parsed = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return {};
+
+    return Object.entries(parsed).reduce<Record<string, number>>(
+      (acc, [key, value]) => {
+        if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+          acc[key] = Math.floor(value);
+        }
+        return acc;
+      },
+      {},
+    );
+  } catch {
+    return {};
+  }
+}
+
+function saveQrCounters(counters: Record<string, number>) {
+  localStorage.setItem(QR_COUNTERS_STORAGE_KEY, JSON.stringify(counters));
 }
 
 function getResultadoConfig(resultado: ResultadoQr | null) {
@@ -56,6 +93,7 @@ export default function QrScanner() {
   const [resultado, setResultado] = useState<ResultadoQr | null>(null);
   const [mensaje, setMensaje] = useState<string>("Esperando escaneo...");
   const [entradasEscaneadas, setEntradasEscaneadas] = useState(0);
+  const [activeEventId, setActiveEventId] = useState<number | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
 
   const hiddenInputRef = useRef<HTMLInputElement | null>(null);
@@ -82,6 +120,56 @@ export default function QrScanner() {
       window.removeEventListener("click", handleWindowClick);
     };
   }, [focusHiddenInput]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadCounterFromActiveEvent = async () => {
+      try {
+        const { data } =
+          await api.get<VentaEntradasResponse>("/venta_entradas");
+        const nextActiveEventId =
+          Array.isArray(data?.eventos) && data.eventos.length > 0
+            ? Number(data.eventos[0].id)
+            : null;
+
+        if (!isMounted) return;
+
+        setActiveEventId(nextActiveEventId);
+
+        if (nextActiveEventId === null) {
+          setEntradasEscaneadas(0);
+          return;
+        }
+
+        const counters = readQrCounters();
+        setEntradasEscaneadas(counters[String(nextActiveEventId)] ?? 0);
+      } catch (error) {
+        console.error("Error al cargar evento activo para scanner:", error);
+      }
+    };
+
+    void loadCounterFromActiveEvent();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const updateStoredCounter = useCallback(
+    (eventId: number | null, nextValue: number) => {
+      if (eventId === null) {
+        setEntradasEscaneadas(Math.max(0, Math.floor(nextValue)));
+        return;
+      }
+
+      const counters = readQrCounters();
+      counters[String(eventId)] = Math.max(0, Math.floor(nextValue));
+      saveQrCounters(counters);
+      setEntradasEscaneadas(counters[String(eventId)]);
+    },
+    [],
+  );
 
   const validarQr = useCallback(
     async (qrCodigo: string) => {
@@ -112,14 +200,31 @@ export default function QrScanner() {
 
         const nextResultado =
           data?.resultado ?? (data?.ok ? "valido" : "invalido");
+        const eventIdFromResponse =
+          typeof data?.data?.evento_id === "number"
+            ? data.data.evento_id
+            : null;
+        const counterEventId = eventIdFromResponse ?? activeEventId;
 
         setResultado(nextResultado);
         setMensaje(data?.mensaje ?? "Validación procesada.");
 
         if (typeof data?.entradas_escaneadas === "number") {
-          setEntradasEscaneadas(data.entradas_escaneadas);
+          updateStoredCounter(counterEventId, data.entradas_escaneadas);
         } else if (nextResultado === "valido") {
-          setEntradasEscaneadas((prev) => prev + 1);
+          const counters = readQrCounters();
+          const previousCount =
+            counterEventId !== null
+              ? (counters[String(counterEventId)] ?? 0)
+              : entradasEscaneadas;
+          updateStoredCounter(counterEventId, previousCount + 1);
+        }
+
+        if (
+          eventIdFromResponse !== null &&
+          eventIdFromResponse !== activeEventId
+        ) {
+          setActiveEventId(eventIdFromResponse);
         }
       } catch (error: unknown) {
         const responseData =
@@ -147,7 +252,7 @@ export default function QrScanner() {
         );
 
         if (typeof responseData?.entradas_escaneadas === "number") {
-          setEntradasEscaneadas(responseData.entradas_escaneadas);
+          updateStoredCounter(activeEventId, responseData.entradas_escaneadas);
         }
       } finally {
         setIsProcessing(false);
@@ -159,7 +264,13 @@ export default function QrScanner() {
         }, 50);
       }
     },
-    [isProcessing, user?.id],
+    [
+      activeEventId,
+      entradasEscaneadas,
+      isProcessing,
+      updateStoredCounter,
+      user?.id,
+    ],
   );
 
   const handleScannerSubmit = useCallback(async () => {

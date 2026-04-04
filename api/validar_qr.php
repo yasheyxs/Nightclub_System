@@ -71,6 +71,7 @@ try {
             v.qr_generado_at,
             v.qr_usado_at,
             e.nombre AS entrada_nombre,
+            ev.id AS evento_id,
             ev.nombre AS evento_nombre,
             ev.activo
         FROM ventas_entradas v
@@ -166,6 +167,7 @@ try {
         'mensaje' => $mensaje,
         'data' => [
             'venta_id' => $ventaId,
+            'evento_id' => isset($venta['evento_id']) ? (int)$venta['evento_id'] : null,
             'entrada' => $venta['entrada_nombre'],
             'evento' => $venta['evento_nombre'],
             'nombre' => $venta['nombre'],
