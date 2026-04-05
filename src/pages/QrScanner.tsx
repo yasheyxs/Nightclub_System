@@ -19,6 +19,16 @@ interface ValidarQrResponse {
   details?: string;
 }
 
+interface ObtenerConteoResponse {
+  ok?: boolean;
+  evento_id?: number;
+  entradas_escaneadas?: number;
+  mensaje?: string;
+}
+
+const STORAGE_EVENTO_ID_KEY = "qr_scanner_evento_id";
+const STORAGE_ENTRADAS_KEY = "qr_scanner_entradas_escaneadas";
+
 function getResultadoConfig(resultado: ResultadoQr | null) {
   switch (resultado) {
     case "valido":
@@ -54,12 +64,37 @@ function getResultadoConfig(resultado: ResultadoQr | null) {
   }
 }
 
+function getStoredEventoId(): number | null {
+  const raw = window.localStorage.getItem(STORAGE_EVENTO_ID_KEY);
+
+  if (!raw) return null;
+
+  const parsed = Number(raw);
+
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function getStoredEntradasEscaneadas(): number {
+  const raw = window.localStorage.getItem(STORAGE_ENTRADAS_KEY);
+
+  if (!raw) return 0;
+
+  const parsed = Number(raw);
+
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 0;
+}
+
 export default function QrScanner() {
   const { user } = useAuth();
 
   const [resultado, setResultado] = useState<ResultadoQr | null>(null);
   const [mensaje, setMensaje] = useState<string>("Esperando escaneo...");
-  const [entradasEscaneadas, setEntradasEscaneadas] = useState(0);
+  const [entradasEscaneadas, setEntradasEscaneadas] = useState<number>(() =>
+    getStoredEntradasEscaneadas(),
+  );
+  const [eventoIdActual, setEventoIdActual] = useState<number | null>(() =>
+    getStoredEventoId(),
+  );
   const [isProcessing, setIsProcessing] = useState(false);
 
   const hiddenInputRef = useRef<HTMLInputElement | null>(null);
@@ -74,6 +109,46 @@ export default function QrScanner() {
     hiddenInputRef.current?.focus();
   }, []);
 
+  const persistirConteo = useCallback(
+    (count: number, eventoId: number | null) => {
+      const safeCount = Math.max(0, Math.floor(count));
+
+      setEntradasEscaneadas(safeCount);
+      window.localStorage.setItem(STORAGE_ENTRADAS_KEY, String(safeCount));
+
+      setEventoIdActual(eventoId);
+
+      if (eventoId && eventoId > 0) {
+        window.localStorage.setItem(STORAGE_EVENTO_ID_KEY, String(eventoId));
+      } else {
+        window.localStorage.removeItem(STORAGE_EVENTO_ID_KEY);
+      }
+    },
+    [],
+  );
+
+  const cargarConteoActual = useCallback(
+    async (eventoId: number) => {
+      if (!Number.isInteger(eventoId) || eventoId <= 0) return;
+
+      try {
+        const { data } = await api.get<ObtenerConteoResponse>(
+          "/validar_qr.php",
+          {
+            params: { evento_id: eventoId },
+          },
+        );
+
+        if (data?.ok && typeof data.entradas_escaneadas === "number") {
+          persistirConteo(data.entradas_escaneadas, eventoId);
+        }
+      } catch (error) {
+        console.error("OBTENER_CONTEO_QR_ERROR:", error);
+      }
+    },
+    [persistirConteo],
+  );
+
   useEffect(() => {
     focusHiddenInput();
 
@@ -86,6 +161,12 @@ export default function QrScanner() {
       window.removeEventListener("click", handleWindowClick);
     };
   }, [focusHiddenInput]);
+
+  useEffect(() => {
+    if (eventoIdActual) {
+      void cargarConteoActual(eventoIdActual);
+    }
+  }, [cargarConteoActual, eventoIdActual]);
 
   const validarQr = useCallback(
     async (qrCodigo: string) => {
@@ -120,9 +201,18 @@ export default function QrScanner() {
         setResultado(nextResultado);
         setMensaje(data?.mensaje ?? "Validación procesada.");
 
+        const nextEventoId =
+          typeof data?.data?.evento_id === "number" && data.data.evento_id > 0
+            ? data.data.evento_id
+            : eventoIdActual;
+
         if (typeof data?.entradas_escaneadas === "number") {
-          setEntradasEscaneadas(
-            Math.max(0, Math.floor(data.entradas_escaneadas)),
+          persistirConteo(data.entradas_escaneadas, nextEventoId ?? null);
+        } else if (nextEventoId) {
+          setEventoIdActual(nextEventoId);
+          window.localStorage.setItem(
+            STORAGE_EVENTO_ID_KEY,
+            String(nextEventoId),
           );
         }
       } catch (error: unknown) {
@@ -131,11 +221,8 @@ export default function QrScanner() {
           error !== null &&
           "response" in error &&
           typeof (error as { response?: unknown }).response === "object"
-            ? ((
-                error as {
-                  response?: { data?: ValidarQrResponse };
-                }
-              ).response?.data ?? null)
+            ? ((error as { response?: { data?: ValidarQrResponse } }).response
+                ?.data ?? null)
             : null;
 
         console.error("VALIDAR_QR_ERROR:", responseData);
@@ -149,9 +236,16 @@ export default function QrScanner() {
             "No se pudo validar el QR.",
         );
 
+        const nextEventoId =
+          typeof responseData?.data?.evento_id === "number" &&
+          responseData.data.evento_id > 0
+            ? responseData.data.evento_id
+            : eventoIdActual;
+
         if (typeof responseData?.entradas_escaneadas === "number") {
-          setEntradasEscaneadas(
-            Math.max(0, Math.floor(responseData.entradas_escaneadas)),
+          persistirConteo(
+            responseData.entradas_escaneadas,
+            nextEventoId ?? null,
           );
         }
       } finally {
@@ -164,7 +258,7 @@ export default function QrScanner() {
         }, 50);
       }
     },
-    [isProcessing, user?.id],
+    [eventoIdActual, isProcessing, persistirConteo, user?.id],
   );
 
   const handleScannerSubmit = useCallback(async () => {

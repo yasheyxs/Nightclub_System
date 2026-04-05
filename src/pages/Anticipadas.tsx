@@ -157,6 +157,8 @@ interface ConfirmarImpresionResponse {
 
 type BusyAction = "download" | "print" | "delete" | "create" | null;
 
+const MOBILE_BREAKPOINT = 768;
+
 const normalizeEntradaName = (name: string): string =>
   name
     .normalize("NFD")
@@ -235,14 +237,12 @@ const getLoggedUserId = (): number | null => {
   return null;
 };
 
-const isMobileDevice = (): boolean => {
+const getIsSmallScreen = (): boolean => {
   if (typeof window === "undefined") {
     return false;
   }
 
-  return /Android|iPhone|iPad|iPod|Opera Mini|IEMobile|WPDesktop/i.test(
-    window.navigator.userAgent,
-  );
+  return window.innerWidth < MOBILE_BREAKPOINT;
 };
 
 export default function Anticipadas(): JSX.Element {
@@ -263,7 +263,7 @@ export default function Anticipadas(): JSX.Element {
   const [search, setSearch] = useState<string>("");
   const [vendedores, setVendedores] = useState<VendedorOption[]>([]);
   const [busyAction, setBusyAction] = useState<BusyAction>(null);
-  const [isMobile, setIsMobile] = useState<boolean>(false);
+  const [isMobile, setIsMobile] = useState<boolean>(getIsSmallScreen);
 
   const downloadLockRef = useRef<boolean>(false);
   const printLockRef = useRef<boolean>(false);
@@ -408,9 +408,21 @@ export default function Anticipadas(): JSX.Element {
   };
 
   useEffect(() => {
-    setIsMobile(isMobileDevice());
     void fetchAnticipadas();
     void fetchOptions();
+  }, []);
+
+  useEffect(() => {
+    const handleResize = (): void => {
+      setIsMobile(getIsSmallScreen());
+    };
+
+    handleResize();
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+    };
   }, []);
 
   const selectedEntrada = entradasAnticipadas[0] ?? null;
@@ -1082,24 +1094,22 @@ export default function Anticipadas(): JSX.Element {
           )}
         </Button>
 
-        {!isMobile && (
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled={disableAll}
-            onClick={() => {
-              void handlePrint(item.id);
-            }}
-            title="Imprimir"
-            className="min-w-[44px] gap-2"
-          >
-            {isPrinting ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Printer className="h-4 w-4" />
-            )}
-          </Button>
-        )}
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={disableAll}
+          onClick={() => {
+            void handlePrint(item.id);
+          }}
+          title="Imprimir"
+          className="hidden min-w-[44px] gap-2 md:inline-flex"
+        >
+          {isPrinting ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Printer className="h-4 w-4" />
+          )}
+        </Button>
 
         <Button
           size="sm"

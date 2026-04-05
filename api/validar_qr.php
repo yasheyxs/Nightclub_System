@@ -5,7 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 
 header("Access-Control-Allow-Origin: *");
-header("Access-Control-Allow-Methods: POST, OPTIONS");
+header("Access-Control-Allow-Methods: GET, POST, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
 header("Content-Type: application/json; charset=utf-8");
 
@@ -59,11 +59,32 @@ function contarEntradasEscaneadas(PDO $pdo, ?int $eventoId): int
 }
 
 try {
+    $pdo = getPdo();
+
+    if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+        $eventoId = isset($_GET['evento_id']) ? (int)$_GET['evento_id'] : 0;
+
+        if ($eventoId <= 0) {
+            jsonResponse(400, [
+                'ok' => false,
+                'mensaje' => 'evento_id requerido',
+                'entradas_escaneadas' => 0,
+            ]);
+        }
+
+        $entradasEscaneadas = contarEntradasEscaneadas($pdo, $eventoId);
+
+        jsonResponse(200, [
+            'ok' => true,
+            'evento_id' => $eventoId,
+            'entradas_escaneadas' => $entradasEscaneadas,
+        ]);
+    }
+
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         jsonResponse(405, ['ok' => false, 'error' => 'Método no permitido']);
     }
 
-    $pdo = getPdo();
     $input = getJsonInput();
 
     $qrCodigo = trim((string)($input['qr_codigo'] ?? ''));

@@ -550,6 +550,18 @@ try {
               AND LOWER(COALESCE(e.nombre, '')) = LOWER('anticipada')
             ORDER BY v.fecha_venta DESC, v.id DESC
         ");
+        $expandido = [];
+
+        foreach ($anticipadas as $row) {
+            $cantidad = max(1, (int)$row['cantidad']);
+
+            for ($i = 0; $i < $cantidad; $i++) {
+                $row['cantidad'] = 1;
+                $expandido[] = $row;
+            }
+        }
+
+        $anticipadas = $expandido;
         $anticipadas = $stmt->fetchAll() ?: [];
         logTime('GET anticipadas', $timer);
 
