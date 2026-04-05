@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -148,6 +148,15 @@ interface PrepararAnticipadaResponse {
   anticipada?: AnticipadaResponse;
 }
 
+interface ConfirmarImpresionResponse {
+  success?: boolean;
+  mensaje?: string;
+  actualizados?: number;
+  entradas_escaneadas?: number;
+}
+
+type BusyAction = "download" | "print" | "delete" | "create" | null;
+
 const normalizeEntradaName = (name: string): string =>
   name
     .normalize("NFD")
@@ -226,6 +235,16 @@ const getLoggedUserId = (): number | null => {
   return null;
 };
 
+const isMobileDevice = (): boolean => {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return /Android|iPhone|iPad|iPod|Opera Mini|IEMobile|WPDesktop/i.test(
+    window.navigator.userAgent,
+  );
+};
+
 export default function Anticipadas(): JSX.Element {
   const [anticipadas, setAnticipadas] = useState<AnticipadaItem[]>([]);
   const [entradasAnticipadas, setEntradasAnticipadas] = useState<
@@ -243,6 +262,13 @@ export default function Anticipadas(): JSX.Element {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState<boolean>(false);
   const [search, setSearch] = useState<string>("");
   const [vendedores, setVendedores] = useState<VendedorOption[]>([]);
+  const [busyAction, setBusyAction] = useState<BusyAction>(null);
+  const [isMobile, setIsMobile] = useState<boolean>(false);
+
+  const downloadLockRef = useRef<boolean>(false);
+  const printLockRef = useRef<boolean>(false);
+  const deleteLockRef = useRef<boolean>(false);
+
   const [formData, setFormData] = useState({
     nombre: "",
     dni: "",
@@ -252,6 +278,13 @@ export default function Anticipadas(): JSX.Element {
     cantidad: 1,
     incluyeTrago: false,
   });
+
+  const isAnyActionRunning =
+    busyAction !== null ||
+    creating ||
+    downloadingId !== null ||
+    printingId !== null ||
+    deletingId !== null;
 
   const resetForm = (): void => {
     setFormData((prev) => ({
@@ -375,6 +408,7 @@ export default function Anticipadas(): JSX.Element {
   };
 
   useEffect(() => {
+    setIsMobile(isMobileDevice());
     void fetchAnticipadas();
     void fetchOptions();
   }, []);
@@ -435,22 +469,18 @@ export default function Anticipadas(): JSX.Element {
       gigante: 54,
       destacado: 38,
       normal: 30,
-      small: 24,
       empty: 18,
     };
 
     const measureTicketHeight = (ticket: PrintJob): number => {
       let height = topPadding;
 
-      height += 20; // línea superior
+      height += 20;
       height += 18;
-
       height += lineHeights.titulo;
       height += lineHeights.empty;
 
-      if (ticket.tipo?.trim()) {
-        height += lineHeights.gigante;
-      }
+      if (ticket.tipo?.trim()) height += lineHeights.gigante;
 
       if (ticket.es_cortesia) {
         height += lineHeights.destacado;
@@ -464,29 +494,17 @@ export default function Anticipadas(): JSX.Element {
         height += lineHeights.normal;
       }
 
-      if (ticket.lista?.trim()) {
-        height += lineHeights.normal;
-      }
-
-      if (ticket.trago_texto?.trim()) {
-        height += lineHeights.normal;
-      }
-
-      if (ticket.nombre?.trim()) {
-        height += lineHeights.normal;
-      }
-
-      if (ticket.dni?.trim()) {
-        height += lineHeights.normal;
-      }
+      if (ticket.lista?.trim()) height += lineHeights.normal;
+      if (ticket.trago_texto?.trim()) height += lineHeights.normal;
+      if (ticket.nombre?.trim()) height += lineHeights.normal;
+      if (ticket.dni?.trim()) height += lineHeights.normal;
 
       height += lineHeights.empty;
       height += lineHeights.destacado;
 
       height += 18;
-      height += 20; // línea antes del QR
+      height += 20;
       height += 18;
-
       height += qrSize;
       height += bottomPadding;
 
@@ -673,6 +691,16 @@ export default function Anticipadas(): JSX.Element {
   };
 
   const handleDownloadQr = async (itemId: number): Promise<void> => {
+    if (downloadLockRef.current || isAnyActionRunning) {
+      toast({
+        title: "Esperá un momento",
+        description: "Ya hay una descarga o acción en curso.",
+      });
+      return;
+    }
+
+    downloadLockRef.current = true;
+    setBusyAction("download");
     setDownloadingId(itemId);
 
     try {
@@ -700,9 +728,8 @@ export default function Anticipadas(): JSX.Element {
       const sheetDataUrl = await buildQrSheetDataUrl(validTickets);
 
       const now = new Date();
-
-      const fecha = now.toLocaleDateString("es-AR").replace(/\//g, "-"); // 05-04-2026
-      const hora = now.toTimeString().slice(0, 5).replace(":", "-"); // 14-32
+      const fecha = now.toLocaleDateString("es-AR").replace(/\//g, "-");
+      const hora = now.toTimeString().slice(0, 5).replace(":", "-");
 
       downloadDataUrl(
         sheetDataUrl,
@@ -744,10 +771,31 @@ export default function Anticipadas(): JSX.Element {
       });
     } finally {
       setDownloadingId(null);
+      setBusyAction(null);
+      downloadLockRef.current = false;
     }
   };
 
   const handlePrint = async (itemId: number): Promise<void> => {
+    if (isMobile) {
+      toast({
+        title: "Impresión no disponible en celular",
+        description:
+          "Desde mobile usá descargar. La impresión directa queda solo para la PC con ticketera.",
+      });
+      return;
+    }
+
+    if (printLockRef.current || isAnyActionRunning) {
+      toast({
+        title: "Esperá un momento",
+        description: "Ya hay otra acción en curso.",
+      });
+      return;
+    }
+
+    printLockRef.current = true;
+    setBusyAction("print");
     setPrintingId(itemId);
 
     interface PrinterResponse {
@@ -766,8 +814,9 @@ export default function Anticipadas(): JSX.Element {
       );
 
       const printJobs = Array.isArray(data?.print_jobs) ? data.print_jobs : [];
+      const tickets = Array.isArray(data?.tickets) ? data.tickets : [];
 
-      if (printJobs.length === 0) {
+      if (printJobs.length === 0 || tickets.length === 0) {
         throw new Error("El backend no devolvió tickets para imprimir.");
       }
 
@@ -792,14 +841,22 @@ export default function Anticipadas(): JSX.Element {
         );
       }
 
+      await api.post<ConfirmarImpresionResponse>("/anticipadas", {
+        accion: "confirmar_impresion",
+        tickets_ids: tickets.map((ticket) => Number(ticket.id)),
+        evento_id:
+          typeof printJobs[0]?.evento_id === "number"
+            ? printJobs[0].evento_id
+            : null,
+      });
+
       await fetchAnticipadas();
 
       toast({
         title: "Ticket impreso",
         description:
           printerData?.mensaje ??
-          data?.mensaje ??
-          "Ticket enviado a impresión.",
+          "Ticket enviado a impresión y quitado de la lista.",
       });
     } catch (error) {
       console.error("Error al imprimir anticipada:", error);
@@ -827,10 +884,20 @@ export default function Anticipadas(): JSX.Element {
       });
     } finally {
       setPrintingId(null);
+      setBusyAction(null);
+      printLockRef.current = false;
     }
   };
 
   const handleCreate = async (): Promise<void> => {
+    if (isAnyActionRunning) {
+      toast({
+        title: "Esperá un momento",
+        description: "Terminá primero la acción actual.",
+      });
+      return;
+    }
+
     if (!formData.nombre.trim() || !formData.entradaId) {
       toast({
         title: "Datos incompletos",
@@ -869,6 +936,7 @@ export default function Anticipadas(): JSX.Element {
       return;
     }
 
+    setBusyAction("create");
     setCreating(true);
 
     try {
@@ -913,14 +981,26 @@ export default function Anticipadas(): JSX.Element {
       });
     } finally {
       setCreating(false);
+      setBusyAction(null);
     }
   };
 
   const handleDelete = async (): Promise<void> => {
     if (!deleteTarget) return;
 
-    const usuarioId = getLoggedUserId();
+    if (deleteLockRef.current || isAnyActionRunning) {
+      toast({
+        title: "Esperá un momento",
+        description: "Ya hay otra acción en curso.",
+      });
+      return;
+    }
+
+    deleteLockRef.current = true;
+    setBusyAction("delete");
     setDeletingId(deleteTarget.id);
+
+    const usuarioId = getLoggedUserId();
 
     try {
       await api.post("/anticipadas", {
@@ -966,6 +1046,8 @@ export default function Anticipadas(): JSX.Element {
       });
     } finally {
       setDeletingId(null);
+      setBusyAction(null);
+      deleteLockRef.current = false;
     }
   };
 
@@ -974,6 +1056,71 @@ export default function Anticipadas(): JSX.Element {
   );
 
   const selectedVendedorEsPromotor = selectedVendedor?.es_promotor === true;
+
+  const renderActionButtons = (item: AnticipadaItem): JSX.Element => {
+    const disableAll = isAnyActionRunning;
+    const isDownloading = downloadingId === item.id;
+    const isPrinting = printingId === item.id;
+    const isDeleting = deletingId === item.id;
+
+    return (
+      <div className="flex flex-wrap items-center justify-end gap-3">
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={disableAll}
+          onClick={() => {
+            void handleDownloadQr(item.id);
+          }}
+          title="Descargar QR"
+          className="min-w-[44px] gap-2"
+        >
+          {isDownloading ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Download className="h-4 w-4" />
+          )}
+        </Button>
+
+        {!isMobile && (
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={disableAll}
+            onClick={() => {
+              void handlePrint(item.id);
+            }}
+            title="Imprimir"
+            className="min-w-[44px] gap-2"
+          >
+            {isPrinting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Printer className="h-4 w-4" />
+            )}
+          </Button>
+        )}
+
+        <Button
+          size="sm"
+          variant="destructive"
+          disabled={disableAll}
+          onClick={() => {
+            setDeleteTarget(item);
+            setDeleteDialogOpen(true);
+          }}
+          title="Eliminar"
+          className="ml-1 min-w-[44px] gap-2 sm:ml-2"
+        >
+          {isDeleting ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Trash2 className="h-4 w-4" />
+          )}
+        </Button>
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -998,7 +1145,7 @@ export default function Anticipadas(): JSX.Element {
           }}
         >
           <DialogTrigger asChild>
-            <Button size="lg" className="gap-2">
+            <Button size="lg" className="gap-2" disabled={isAnyActionRunning}>
               <UserRoundPlus className="h-5 w-5" />
               Registrar
             </Button>
@@ -1023,6 +1170,7 @@ export default function Anticipadas(): JSX.Element {
                     }
                     placeholder="Ej: María Pérez"
                     className="h-11"
+                    disabled={isAnyActionRunning}
                   />
                 </div>
 
@@ -1036,6 +1184,7 @@ export default function Anticipadas(): JSX.Element {
                     }
                     placeholder="Opcional"
                     className="h-11"
+                    disabled={isAnyActionRunning}
                   />
                 </div>
               </div>
@@ -1089,6 +1238,7 @@ export default function Anticipadas(): JSX.Element {
                       })
                     }
                     className="h-11"
+                    disabled={isAnyActionRunning}
                   />
                 </div>
               </div>
@@ -1104,7 +1254,7 @@ export default function Anticipadas(): JSX.Element {
                         eventoId: value === "none" ? "" : value,
                       })
                     }
-                    disabled={optionsLoading}
+                    disabled={optionsLoading || isAnyActionRunning}
                   >
                     <SelectTrigger className="h-11">
                       <SelectValue placeholder="Sin evento asignado" />
@@ -1141,7 +1291,11 @@ export default function Anticipadas(): JSX.Element {
                         promotorId: value,
                       })
                     }
-                    disabled={optionsLoading || vendedores.length === 0}
+                    disabled={
+                      optionsLoading ||
+                      vendedores.length === 0 ||
+                      isAnyActionRunning
+                    }
                   >
                     <SelectTrigger className="h-11">
                       <SelectValue placeholder="Seleccioná un vendedor" />
@@ -1183,6 +1337,7 @@ export default function Anticipadas(): JSX.Element {
                   onCheckedChange={(checked) =>
                     setFormData({ ...formData, incluyeTrago: checked })
                   }
+                  disabled={isAnyActionRunning}
                 />
               </div>
 
@@ -1190,7 +1345,7 @@ export default function Anticipadas(): JSX.Element {
                 <Button
                   className="w-full md:w-auto"
                   onClick={handleCreate}
-                  disabled={creating || optionsLoading}
+                  disabled={creating || optionsLoading || isAnyActionRunning}
                 >
                   {creating ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -1237,107 +1392,91 @@ export default function Anticipadas(): JSX.Element {
               No hay anticipadas para mostrar.
             </p>
           ) : (
-            <ScrollArea className="h-[480px]">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Nombre</TableHead>
-                    <TableHead>DNI</TableHead>
-                    <TableHead>Entrada</TableHead>
-                    <TableHead className="text-center">Cantidad</TableHead>
-                    <TableHead>Evento</TableHead>
-                    <TableHead className="text-right">Acciones</TableHead>
-                  </TableRow>
-                </TableHeader>
-
-                <TableBody>
-                  {filteredAnticipadas.map((item) => (
-                    <TableRow key={item.id}>
-                      <TableCell>
-                        <div className="font-semibold text-foreground">
+            <>
+              <div className="space-y-3 md:hidden">
+                {filteredAnticipadas.map((item) => (
+                  <div
+                    key={item.id}
+                    className="rounded-xl border border-border bg-card p-4"
+                  >
+                    <div className="mb-3 flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold text-foreground">
                           {item.nombre}
-                        </div>
-                        <p className="text-xs text-muted-foreground">
-                          Anticipada registrada
                         </p>
-                      </TableCell>
+                        <p className="text-sm text-muted-foreground">
+                          {item.eventoNombre}
+                        </p>
+                      </div>
 
-                      <TableCell>{item.dni}</TableCell>
+                      <Badge variant="secondary">{item.cantidad}</Badge>
+                    </div>
 
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Badge variant="secondary">
-                            {item.entradaNombre}
-                          </Badge>
-                          {item.incluyeTrago && (
-                            <Badge variant="outline">+ Trago</Badge>
-                          )}
-                        </div>
-                      </TableCell>
+                    <div className="mb-3 flex flex-wrap gap-2">
+                      <Badge variant="outline">{item.entradaNombre}</Badge>
+                      {item.incluyeTrago && (
+                        <Badge variant="outline">+ Trago</Badge>
+                      )}
+                      {item.dni !== "-" && (
+                        <Badge variant="outline">DNI {item.dni}</Badge>
+                      )}
+                    </div>
 
-                      <TableCell className="text-center font-semibold">
-                        {item.cantidad}
-                      </TableCell>
+                    {renderActionButtons(item)}
+                  </div>
+                ))}
+              </div>
 
-                      <TableCell>{item.eventoNombre}</TableCell>
+              <div className="hidden md:block">
+                <ScrollArea className="h-[480px]">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Nombre</TableHead>
+                        <TableHead>DNI</TableHead>
+                        <TableHead>Entrada</TableHead>
+                        <TableHead>Evento</TableHead>
+                        <TableHead className="text-right">Acciones</TableHead>
+                      </TableRow>
+                    </TableHeader>
 
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled={downloadingId === item.id}
-                            onClick={() => {
-                              void handleDownloadQr(item.id);
-                            }}
-                            title="Descargar QR"
-                          >
-                            {downloadingId === item.id ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Download className="h-4 w-4" />
-                            )}
-                          </Button>
+                    <TableBody>
+                      {filteredAnticipadas.map((item) => (
+                        <TableRow key={item.id}>
+                          <TableCell>
+                            <div className="font-semibold text-foreground">
+                              {item.nombre}
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              Anticipada registrada
+                            </p>
+                          </TableCell>
 
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            disabled={printingId === item.id}
-                            onClick={() => {
-                              void handlePrint(item.id);
-                            }}
-                            title="Imprimir"
-                          >
-                            {printingId === item.id ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Printer className="h-4 w-4" />
-                            )}
-                          </Button>
+                          <TableCell>{item.dni}</TableCell>
 
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            disabled={deletingId === item.id}
-                            onClick={() => {
-                              setDeleteTarget(item);
-                              setDeleteDialogOpen(true);
-                            }}
-                            title="Eliminar"
-                          >
-                            {deletingId === item.id ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Trash2 className="h-4 w-4" />
-                            )}
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </ScrollArea>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <Badge variant="secondary">
+                                {item.entradaNombre}
+                              </Badge>
+                              {item.incluyeTrago && (
+                                <Badge variant="outline">+ Trago</Badge>
+                              )}
+                            </div>
+                          </TableCell>
+
+                          <TableCell>{item.eventoNombre}</TableCell>
+
+                          <TableCell className="text-right">
+                            {renderActionButtons(item)}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </ScrollArea>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
@@ -1345,6 +1484,8 @@ export default function Anticipadas(): JSX.Element {
       <AlertDialog
         open={deleteDialogOpen}
         onOpenChange={(open) => {
+          if (deletingId !== null) return;
+
           setDeleteDialogOpen(open);
           if (!open) {
             setDeleteTarget(null);

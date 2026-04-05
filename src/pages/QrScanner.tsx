@@ -15,41 +15,8 @@ interface ValidarQrResponse {
     evento_id?: number | null;
   };
   error?: string;
+  detalle?: string;
   details?: string;
-}
-
-interface VentaEntradasResponse {
-  eventos?: Array<{
-    id: number;
-  }>;
-}
-
-const QR_COUNTERS_STORAGE_KEY = "qr_scanner_counts_by_event";
-
-function readQrCounters(): Record<string, number> {
-  try {
-    const raw = localStorage.getItem(QR_COUNTERS_STORAGE_KEY);
-    if (!raw) return {};
-
-    const parsed = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null) return {};
-
-    return Object.entries(parsed).reduce<Record<string, number>>(
-      (acc, [key, value]) => {
-        if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
-          acc[key] = Math.floor(value);
-        }
-        return acc;
-      },
-      {},
-    );
-  } catch {
-    return {};
-  }
-}
-
-function saveQrCounters(counters: Record<string, number>) {
-  localStorage.setItem(QR_COUNTERS_STORAGE_KEY, JSON.stringify(counters));
 }
 
 function getResultadoConfig(resultado: ResultadoQr | null) {
@@ -93,7 +60,6 @@ export default function QrScanner() {
   const [resultado, setResultado] = useState<ResultadoQr | null>(null);
   const [mensaje, setMensaje] = useState<string>("Esperando escaneo...");
   const [entradasEscaneadas, setEntradasEscaneadas] = useState(0);
-  const [activeEventId, setActiveEventId] = useState<number | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
 
   const hiddenInputRef = useRef<HTMLInputElement | null>(null);
@@ -121,56 +87,6 @@ export default function QrScanner() {
     };
   }, [focusHiddenInput]);
 
-  useEffect(() => {
-    let isMounted = true;
-
-    const loadCounterFromActiveEvent = async () => {
-      try {
-        const { data } =
-          await api.get<VentaEntradasResponse>("/venta_entradas");
-        const nextActiveEventId =
-          Array.isArray(data?.eventos) && data.eventos.length > 0
-            ? Number(data.eventos[0].id)
-            : null;
-
-        if (!isMounted) return;
-
-        setActiveEventId(nextActiveEventId);
-
-        if (nextActiveEventId === null) {
-          setEntradasEscaneadas(0);
-          return;
-        }
-
-        const counters = readQrCounters();
-        setEntradasEscaneadas(counters[String(nextActiveEventId)] ?? 0);
-      } catch (error) {
-        console.error("Error al cargar evento activo para scanner:", error);
-      }
-    };
-
-    void loadCounterFromActiveEvent();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  const updateStoredCounter = useCallback(
-    (eventId: number | null, nextValue: number) => {
-      if (eventId === null) {
-        setEntradasEscaneadas(Math.max(0, Math.floor(nextValue)));
-        return;
-      }
-
-      const counters = readQrCounters();
-      counters[String(eventId)] = Math.max(0, Math.floor(nextValue));
-      saveQrCounters(counters);
-      setEntradasEscaneadas(counters[String(eventId)]);
-    },
-    [],
-  );
-
   const validarQr = useCallback(
     async (qrCodigo: string) => {
       const codigoNormalizado = qrCodigo.trim();
@@ -192,7 +108,7 @@ export default function QrScanner() {
       lastScanRef.current = { value: codigoNormalizado, at: ahora };
 
       try {
-        const { data } = await api.post("/validar_qr.php", {
+        const { data } = await api.post<ValidarQrResponse>("/validar_qr.php", {
           qr_codigo: codigoNormalizado,
           usuario_validador_id: user?.id ?? null,
           dispositivo: "scanner-web",
@@ -200,31 +116,14 @@ export default function QrScanner() {
 
         const nextResultado =
           data?.resultado ?? (data?.ok ? "valido" : "invalido");
-        const eventIdFromResponse =
-          typeof data?.data?.evento_id === "number"
-            ? data.data.evento_id
-            : null;
-        const counterEventId = eventIdFromResponse ?? activeEventId;
 
         setResultado(nextResultado);
         setMensaje(data?.mensaje ?? "Validación procesada.");
 
         if (typeof data?.entradas_escaneadas === "number") {
-          updateStoredCounter(counterEventId, data.entradas_escaneadas);
-        } else if (nextResultado === "valido") {
-          const counters = readQrCounters();
-          const previousCount =
-            counterEventId !== null
-              ? (counters[String(counterEventId)] ?? 0)
-              : entradasEscaneadas;
-          updateStoredCounter(counterEventId, previousCount + 1);
-        }
-
-        if (
-          eventIdFromResponse !== null &&
-          eventIdFromResponse !== activeEventId
-        ) {
-          setActiveEventId(eventIdFromResponse);
+          setEntradasEscaneadas(
+            Math.max(0, Math.floor(data.entradas_escaneadas)),
+          );
         }
       } catch (error: unknown) {
         const responseData =
@@ -241,18 +140,19 @@ export default function QrScanner() {
 
         console.error("VALIDAR_QR_ERROR:", responseData);
 
-        const nextResultado = responseData?.resultado ?? "invalido";
-
-        setResultado(nextResultado);
+        setResultado(responseData?.resultado ?? "invalido");
         setMensaje(
           responseData?.mensaje ??
+            responseData?.detalle ??
             responseData?.details ??
             responseData?.error ??
             "No se pudo validar el QR.",
         );
 
         if (typeof responseData?.entradas_escaneadas === "number") {
-          updateStoredCounter(activeEventId, responseData.entradas_escaneadas);
+          setEntradasEscaneadas(
+            Math.max(0, Math.floor(responseData.entradas_escaneadas)),
+          );
         }
       } finally {
         setIsProcessing(false);
@@ -264,13 +164,7 @@ export default function QrScanner() {
         }, 50);
       }
     },
-    [
-      activeEventId,
-      entradasEscaneadas,
-      isProcessing,
-      updateStoredCounter,
-      user?.id,
-    ],
+    [isProcessing, user?.id],
   );
 
   const handleScannerSubmit = useCallback(async () => {
@@ -296,13 +190,13 @@ export default function QrScanner() {
             void handleScannerSubmit();
           }
         }}
-        className="absolute left-[-9999px] top-[-9999px] opacity-0 pointer-events-none"
+        className="pointer-events-none absolute left-[-9999px] top-[-9999px] opacity-0"
         aria-hidden="true"
         tabIndex={-1}
       />
 
       <div>
-        <h2 className="text-3xl font-bold bg-gradient-primary bg-clip-text text-transparent">
+        <h2 className="bg-gradient-primary bg-clip-text text-3xl font-bold text-transparent">
           QR Scanner
         </h2>
         <p className="text-muted-foreground">
@@ -311,7 +205,7 @@ export default function QrScanner() {
       </div>
 
       <div className="grid grid-cols-1 gap-6">
-        <Card className="bg-gradient-card border-border/50 shadow-card">
+        <Card className="border-border/50 bg-gradient-card shadow-card">
           <CardHeader>
             <CardTitle>Resultado de validación</CardTitle>
           </CardHeader>
@@ -321,23 +215,23 @@ export default function QrScanner() {
               <p className="mb-2 text-sm uppercase tracking-wide text-muted-foreground">
                 Entradas escaneadas
               </p>
-              <p className="text-6xl sm:text-7xl font-black text-primary leading-none">
+              <p className="text-primary text-6xl leading-none font-black sm:text-7xl">
                 {entradasEscaneadas}
               </p>
             </div>
 
-            <div className="rounded-2xl border border-border/60 p-5 text-center space-y-2">
+            <div className="space-y-2 rounded-2xl border border-border/60 p-5 text-center">
               <StatusIcon
                 className={`mx-auto h-12 w-12 ${resultadoConfig.className}`}
               />
 
               <p
-                className={`text-4xl sm:text-5xl font-black ${resultadoConfig.className}`}
+                className={`text-4xl font-black sm:text-5xl ${resultadoConfig.className}`}
               >
                 {resultadoConfig.label}
               </p>
 
-              <p className="text-sm sm:text-base text-muted-foreground">
+              <p className="text-sm text-muted-foreground sm:text-base">
                 {mensaje}
               </p>
 

@@ -250,12 +250,53 @@ function obtenerVentaAnticipadaPorId(PDO $pdo, int $id): ?array
     return $row !== false ? $row : null;
 }
 
+function obtenerCantidadEscaneadasPorEvento(PDO $pdo, ?int $eventoId): int
+{
+    if ($eventoId === null || $eventoId <= 0) {
+        return 0;
+    }
+
+    $stmt = $pdo->prepare("
+        SELECT COUNT(*)::int
+        FROM ventas_entradas
+        WHERE evento_id = :evento_id
+          AND estado = 'usada'
+    ");
+    $stmt->execute([':evento_id' => $eventoId]);
+
+    return (int)$stmt->fetchColumn();
+}
+
+function marcarAnticipadasComoImpresas(PDO $pdo, array $ids): int
+{
+    $ids = array_values(array_unique(array_filter(
+        array_map(static fn($id) => (int)$id, $ids),
+        static fn($id) => $id > 0
+    )));
+
+    if ($ids === []) {
+        return 0;
+    }
+
+    $placeholders = implode(', ', array_fill(0, count($ids), '?'));
+
+    $stmt = $pdo->prepare("
+        UPDATE ventas_entradas
+        SET estado = 'impresa'
+        WHERE id IN ($placeholders)
+          AND estado = 'comprada'
+    ");
+
+    $stmt->execute($ids);
+
+    return $stmt->rowCount();
+}
+
 function materializarAnticipadas(PDO $pdo, int $id): array
 {
     $pdo->beginTransaction();
 
     try {
-        // 1) Bloqueo SOLO de la fila base, sin joins
         $lockStmt = $pdo->prepare("
             SELECT
                 id,
@@ -276,7 +317,6 @@ function materializarAnticipadas(PDO $pdo, int $id): array
             throw new RuntimeException('No se encontró la anticipada.');
         }
 
-        // 2) Traigo el detalle completo ya sin FOR UPDATE y con joins
         $venta = obtenerVentaAnticipadaPorId($pdo, $id);
 
         if ($venta === null) {
@@ -284,13 +324,12 @@ function materializarAnticipadas(PDO $pdo, int $id): array
         }
 
         if (strtolower((string)($venta['estado'] ?? '')) !== 'comprada') {
-            throw new RuntimeException('La anticipada no está disponible para descargar.');
+            throw new RuntimeException('La anticipada no está disponible para procesar.');
         }
 
         $cantidad = max(1, (int)($venta['cantidad'] ?? 1));
         $tickets = [];
 
-        // Caso simple: una sola anticipada
         if ($cantidad === 1) {
             if (empty($venta['qr_codigo'])) {
                 $qrCodigo = generarQrUnico($pdo);
@@ -321,7 +360,6 @@ function materializarAnticipadas(PDO $pdo, int $id): array
             return $tickets;
         }
 
-        // Caso múltiple: se parte en individuales
         $updateOriginalStmt = $pdo->prepare("
             UPDATE ventas_entradas
             SET
@@ -791,6 +829,45 @@ try {
             'print_jobs' => $printJobs,
         ]);
     }
+
+    if ($accion === 'confirmar_impresion') {
+        $ticketsIds = isset($input['tickets_ids']) && is_array($input['tickets_ids'])
+            ? $input['tickets_ids']
+            : [];
+
+        $eventoId = isset($input['evento_id']) && $input['evento_id'] !== ''
+            ? (int)$input['evento_id']
+            : null;
+
+        if ($ticketsIds === []) {
+            jsonResponse(400, ['error' => 'Debe indicar los tickets impresos.']);
+        }
+
+        $pdo->beginTransaction();
+
+        try {
+            $timer = microtime(true);
+            $actualizados = marcarAnticipadasComoImpresas($pdo, $ticketsIds);
+            logTime('confirmar impresion update usadas', $timer);
+
+            $pdo->commit();
+
+            logTime('TOTAL anticipadas.php', $globalStart);
+            jsonResponse(200, [
+                'success' => true,
+                'mensaje' => 'Anticipadas marcadas como impresas.',
+                'actualizados' => $actualizados,
+                'entradas_escaneadas' => obtenerCantidadEscaneadasPorEvento($pdo, $eventoId),
+            ]);
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+
+            throw $e;
+        }
+    }
+
     if ($accion === 'eliminar') {
         $id = isset($input['id']) ? (int)$input['id'] : 0;
         $usuarioId = isset($input['usuario_id']) && $input['usuario_id'] !== ''
