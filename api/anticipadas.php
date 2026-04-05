@@ -526,43 +526,56 @@ try {
         }
 
         $timer = microtime(true);
-        $stmt = $pdo->query("
-            SELECT
-                v.id,
-                v.nombre,
-                v.dni,
-                v.entrada_id,
-                v.evento_id,
-                v.promotor_id,
-                v.cantidad,
-                v.incluye_trago,
-                v.qr_codigo,
-                v.qr_generado_at,
-                e.nombre AS entrada_nombre,
-                v.precio_unitario AS entrada_precio,
-                ev.nombre AS evento_nombre
-            FROM ventas_entradas v
-            LEFT JOIN entradas e
-                ON e.id = v.entrada_id
-            LEFT JOIN eventos ev
-                ON ev.id = v.evento_id
-            WHERE v.estado = 'comprada'
-              AND LOWER(COALESCE(e.nombre, '')) = LOWER('anticipada')
-            ORDER BY v.fecha_venta DESC, v.id DESC
-        ");
-        $expandido = [];
+        $timer = microtime(true);
 
-        foreach ($anticipadas as $row) {
+        $stmt = $pdo->query("
+    SELECT
+        v.id,
+        v.nombre,
+        v.dni,
+        v.entrada_id,
+        v.evento_id,
+        v.promotor_id,
+        v.cantidad,
+        v.incluye_trago,
+        v.qr_codigo,
+        v.qr_generado_at,
+        e.nombre AS entrada_nombre,
+        v.precio_unitario AS entrada_precio,
+        ev.nombre AS evento_nombre
+    FROM ventas_entradas v
+    LEFT JOIN entradas e
+        ON e.id = v.entrada_id
+    LEFT JOIN eventos ev
+        ON ev.id = v.evento_id
+    WHERE v.estado = 'comprada'
+      AND LOWER(COALESCE(e.nombre, '')) = LOWER('anticipada')
+    ORDER BY v.fecha_venta DESC, v.id DESC
+");
+
+        $rows = $stmt->fetchAll() ?: [];
+
+        $anticipadas = [];
+
+        foreach ($rows as $row) {
             $cantidad = max(1, (int)$row['cantidad']);
 
             for ($i = 0; $i < $cantidad; $i++) {
-                $row['cantidad'] = 1;
-                $expandido[] = $row;
+                $copia = $row;
+                $copia['cantidad'] = 1;
+                $anticipadas[] = $copia;
             }
         }
 
-        $anticipadas = $expandido;
-        $anticipadas = $stmt->fetchAll() ?: [];
+        logTime('GET anticipadas', $timer);
+
+        // map
+        $timer = microtime(true);
+        foreach ($anticipadas as &$row) {
+            $row = mapAnticipadaRow($row);
+        }
+        unset($row);
+        logTime('GET anticipadas armado PHP', $timer);
         logTime('GET anticipadas', $timer);
 
         $timer = microtime(true);

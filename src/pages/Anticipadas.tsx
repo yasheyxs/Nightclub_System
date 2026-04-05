@@ -68,6 +68,7 @@ interface AnticipadaResponse {
 
 interface AnticipadaItem {
   id: number;
+  visualKey: string;
   nombre: string;
   dni: string;
   entradaNombre: string;
@@ -165,8 +166,12 @@ const normalizeEntradaName = (name: string): string =>
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase();
 
-const mapAnticipada = (item: AnticipadaResponse): AnticipadaItem => ({
+const mapAnticipada = (
+  item: AnticipadaResponse,
+  index: number,
+): AnticipadaItem => ({
   id: Number(item.id),
+  visualKey: `${Number(item.id)}-${index}`,
   nombre: item.nombre ?? "Sin nombre",
   dni: item.dni ?? "-",
   entradaNombre: item.entrada_nombre ?? "Anticipada",
@@ -302,7 +307,11 @@ export default function Anticipadas(): JSX.Element {
 
     try {
       const { data } = await api.get<AnticipadaResponse[]>("/anticipadas");
-      const mapped: AnticipadaItem[] = (data ?? []).map(mapAnticipada);
+
+      const mapped: AnticipadaItem[] = (data ?? []).map((item, index) =>
+        mapAnticipada(item, index),
+      );
+
       setAnticipadas(mapped);
     } catch (error) {
       console.error("Error cargando anticipadas:", error);
@@ -969,7 +978,13 @@ export default function Anticipadas(): JSX.Element {
       const nueva = data?.anticipada;
 
       if (nueva) {
-        setAnticipadas((prev) => [mapAnticipada(nueva), ...prev]);
+        setAnticipadas((prev) => [
+          {
+            ...mapAnticipada(nueva, 0),
+            visualKey: `${Number(nueva.id)}-${Date.now()}`,
+          },
+          ...prev,
+        ]);
 
         toast({
           title: "Anticipada registrada",
@@ -1406,7 +1421,7 @@ export default function Anticipadas(): JSX.Element {
               <div className="space-y-3 md:hidden">
                 {filteredAnticipadas.map((item) => (
                   <div
-                    key={item.id}
+                    key={item.visualKey}
                     className="rounded-xl border border-border bg-card p-4"
                   >
                     <div className="mb-3 flex items-start justify-between gap-3">
@@ -1452,7 +1467,7 @@ export default function Anticipadas(): JSX.Element {
 
                     <TableBody>
                       {filteredAnticipadas.map((item) => (
-                        <TableRow key={item.id}>
+                        <TableRow key={item.visualKey}>
                           <TableCell>
                             <div className="font-semibold text-foreground">
                               {item.nombre}
