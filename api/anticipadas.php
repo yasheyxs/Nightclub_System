@@ -39,15 +39,6 @@ function getJsonInput(): array
     return is_array($data) ? $data : [];
 }
 
-function normalizeBool(mixed $value): bool
-{
-    return in_array(
-        strtolower(trim((string)$value)),
-        ['1', 'true', 'si', 'yes', 'on'],
-        true
-    );
-}
-
 function generarQrHash(string $qr): string
 {
     return hash('sha256', $qr);
@@ -102,8 +93,10 @@ function mapAnticipadaRow(array $row): array
     $row['evento_id'] = isset($row['evento_id']) ? (int)$row['evento_id'] : null;
     $row['promotor_id'] = isset($row['promotor_id']) ? (int)$row['promotor_id'] : null;
     $row['cantidad'] = (int)($row['cantidad'] ?? 1);
-    $row['incluye_trago'] = filter_var($row['incluye_trago'], FILTER_VALIDATE_BOOLEAN);
+    $row['incluye_trago'] = filter_var($row['incluye_trago'] ?? false, FILTER_VALIDATE_BOOLEAN);
     $row['entrada_precio'] = isset($row['entrada_precio']) ? (float)$row['entrada_precio'] : 0.0;
+    $row['qr_codigo'] = isset($row['qr_codigo']) ? (string)$row['qr_codigo'] : null;
+    $row['qr_generado_at'] = $row['qr_generado_at'] ?? null;
 
     return $row;
 }
@@ -191,6 +184,274 @@ function obtenerEventosActivos(PDO $pdo): array
     return $stmt->fetchAll() ?: [];
 }
 
+function construirPrintJobDesdeVenta(array $venta): array
+{
+    $precio = isset($venta['entrada_precio']) ? (float)$venta['entrada_precio'] : 0.0;
+    $incluyeTrago = filter_var($venta['incluye_trago'] ?? false, FILTER_VALIDATE_BOOLEAN);
+
+    return [
+        'ticket_id' => isset($venta['id']) ? (int)$venta['id'] : 0,
+        'evento_id' => isset($venta['evento_id']) ? (int)$venta['evento_id'] : null,
+        'entrada_id' => isset($venta['entrada_id']) ? (int)$venta['entrada_id'] : null,
+        'usuario_id' => isset($venta['usuario_id']) ? (int)$venta['usuario_id'] : null,
+        'tipo' => trim((string)($venta['entrada_nombre'] ?? 'Anticipada')),
+        'precio' => (int)round($precio),
+        'precio_formateado' => number_format($precio, 0, ',', '.'),
+        'incluye_trago' => $incluyeTrago,
+        'trago_texto' => obtenerTextoTrago($incluyeTrago),
+        'qr' => (string)($venta['qr_codigo'] ?? ''),
+        'estado' => (string)($venta['estado'] ?? 'comprada'),
+        'fecha' => date('d/m/Y'),
+        'hora' => date('H:i'),
+        'negocio' => 'SANTAS',
+        'ancho_papel' => '80mm',
+        'evento_fecha' => formatearFechaEvento($venta['evento_fecha'] ?? null),
+        'es_cortesia' => false,
+        'lista' => '',
+        'nombre' => (string)($venta['nombre'] ?? ''),
+        'dni' => (string)($venta['dni'] ?? ''),
+    ];
+}
+
+function obtenerVentaAnticipadaPorId(PDO $pdo, int $id): ?array
+{
+    $stmt = $pdo->prepare("
+        SELECT
+            v.id,
+            v.nombre,
+            v.dni,
+            v.entrada_id,
+            v.evento_id,
+            v.usuario_id,
+            v.promotor_id,
+            v.cantidad,
+            v.incluye_trago,
+            v.qr_codigo,
+            v.qr_hash,
+            v.qr_generado_at,
+            v.estado,
+            v.precio_unitario AS entrada_precio,
+            e.nombre AS entrada_nombre,
+            ev.nombre AS evento_nombre,
+            ev.fecha AS evento_fecha
+        FROM ventas_entradas v
+        LEFT JOIN entradas e
+            ON e.id = v.entrada_id
+        LEFT JOIN eventos ev
+            ON ev.id = v.evento_id
+        WHERE v.id = :id
+          AND LOWER(COALESCE(e.nombre, '')) = LOWER('anticipada')
+        LIMIT 1
+    ");
+    $stmt->execute([':id' => $id]);
+
+    $row = $stmt->fetch();
+
+    return $row !== false ? $row : null;
+}
+
+function materializarAnticipadas(PDO $pdo, int $id): array
+{
+    $pdo->beginTransaction();
+
+    try {
+        // 1) Bloqueo SOLO de la fila base, sin joins
+        $lockStmt = $pdo->prepare("
+            SELECT
+                id,
+                cantidad,
+                qr_codigo,
+                qr_hash,
+                qr_generado_at,
+                estado
+            FROM ventas_entradas
+            WHERE id = :id
+              AND estado = 'comprada'
+            FOR UPDATE
+        ");
+        $lockStmt->execute([':id' => $id]);
+        $base = $lockStmt->fetch();
+
+        if ($base === false) {
+            throw new RuntimeException('No se encontró la anticipada.');
+        }
+
+        // 2) Traigo el detalle completo ya sin FOR UPDATE y con joins
+        $venta = obtenerVentaAnticipadaPorId($pdo, $id);
+
+        if ($venta === null) {
+            throw new RuntimeException('No se encontró la anticipada.');
+        }
+
+        if (strtolower((string)($venta['estado'] ?? '')) !== 'comprada') {
+            throw new RuntimeException('La anticipada no está disponible para descargar.');
+        }
+
+        $cantidad = max(1, (int)($venta['cantidad'] ?? 1));
+        $tickets = [];
+
+        // Caso simple: una sola anticipada
+        if ($cantidad === 1) {
+            if (empty($venta['qr_codigo'])) {
+                $qrCodigo = generarQrUnico($pdo);
+                $qrHash = generarQrHash($qrCodigo);
+
+                $updateStmt = $pdo->prepare("
+                    UPDATE ventas_entradas
+                    SET
+                        qr_codigo = :qr_codigo,
+                        qr_hash = :qr_hash,
+                        qr_generado_at = COALESCE(qr_generado_at, NOW())
+                    WHERE id = :id
+                ");
+                $updateStmt->execute([
+                    ':id' => $id,
+                    ':qr_codigo' => $qrCodigo,
+                    ':qr_hash' => $qrHash,
+                ]);
+
+                $venta['qr_codigo'] = $qrCodigo;
+                $venta['qr_hash'] = $qrHash;
+                $venta['qr_generado_at'] = date('Y-m-d H:i:s');
+            }
+
+            $tickets[] = $venta;
+            $pdo->commit();
+
+            return $tickets;
+        }
+
+        // Caso múltiple: se parte en individuales
+        $updateOriginalStmt = $pdo->prepare("
+            UPDATE ventas_entradas
+            SET
+                cantidad = 1,
+                qr_codigo = :qr_codigo,
+                qr_hash = :qr_hash,
+                qr_generado_at = COALESCE(qr_generado_at, NOW())
+            WHERE id = :id
+        ");
+
+        $insertCopiaStmt = $pdo->prepare("
+            INSERT INTO ventas_entradas (
+                entrada_id,
+                cantidad,
+                precio_unitario,
+                evento_id,
+                incluye_trago,
+                usuario_id,
+                estado,
+                nombre,
+                dni,
+                promotor_id,
+                qr_codigo,
+                qr_hash,
+                qr_generado_at
+            )
+            VALUES (
+                :entrada_id,
+                1,
+                :precio_unitario,
+                :evento_id,
+                :incluye_trago,
+                :usuario_id,
+                'comprada',
+                :nombre,
+                :dni,
+                :promotor_id,
+                :qr_codigo,
+                :qr_hash,
+                NOW()
+            )
+            RETURNING id
+        ");
+
+        for ($i = 0; $i < $cantidad; $i++) {
+            $qrCodigo = generarQrUnico($pdo);
+            $qrHash = generarQrHash($qrCodigo);
+
+            if ($i === 0) {
+                $updateOriginalStmt->execute([
+                    ':id' => $id,
+                    ':qr_codigo' => $qrCodigo,
+                    ':qr_hash' => $qrHash,
+                ]);
+
+                $venta['cantidad'] = 1;
+                $venta['qr_codigo'] = $qrCodigo;
+                $venta['qr_hash'] = $qrHash;
+                $venta['qr_generado_at'] = date('Y-m-d H:i:s');
+                $tickets[] = $venta;
+                continue;
+            }
+
+            $insertCopiaStmt->bindValue(':entrada_id', (int)$venta['entrada_id'], PDO::PARAM_INT);
+            $insertCopiaStmt->bindValue(':precio_unitario', (float)$venta['entrada_precio']);
+            $insertCopiaStmt->bindValue(
+                ':evento_id',
+                $venta['evento_id'] !== null ? (int)$venta['evento_id'] : null,
+                $venta['evento_id'] !== null ? PDO::PARAM_INT : PDO::PARAM_NULL
+            );
+            $insertCopiaStmt->bindValue(
+                ':incluye_trago',
+                filter_var($venta['incluye_trago'], FILTER_VALIDATE_BOOLEAN),
+                PDO::PARAM_BOOL
+            );
+            $insertCopiaStmt->bindValue(
+                ':usuario_id',
+                $venta['usuario_id'] !== null ? (int)$venta['usuario_id'] : null,
+                $venta['usuario_id'] !== null ? PDO::PARAM_INT : PDO::PARAM_NULL
+            );
+            $insertCopiaStmt->bindValue(':nombre', (string)$venta['nombre'], PDO::PARAM_STR);
+            $insertCopiaStmt->bindValue(
+                ':dni',
+                (($venta['dni'] ?? null) !== null && trim((string)$venta['dni']) !== '') ? (string)$venta['dni'] : null,
+                (($venta['dni'] ?? null) !== null && trim((string)$venta['dni']) !== '') ? PDO::PARAM_STR : PDO::PARAM_NULL
+            );
+            $insertCopiaStmt->bindValue(
+                ':promotor_id',
+                $venta['promotor_id'] !== null ? (int)$venta['promotor_id'] : null,
+                $venta['promotor_id'] !== null ? PDO::PARAM_INT : PDO::PARAM_NULL
+            );
+            $insertCopiaStmt->bindValue(':qr_codigo', $qrCodigo, PDO::PARAM_STR);
+            $insertCopiaStmt->bindValue(':qr_hash', $qrHash, PDO::PARAM_STR);
+            $insertCopiaStmt->execute();
+
+            $nuevoId = (int)$insertCopiaStmt->fetchColumn();
+
+            $tickets[] = [
+                'id' => $nuevoId,
+                'nombre' => $venta['nombre'],
+                'dni' => $venta['dni'],
+                'entrada_id' => $venta['entrada_id'],
+                'evento_id' => $venta['evento_id'],
+                'usuario_id' => $venta['usuario_id'],
+                'promotor_id' => $venta['promotor_id'],
+                'cantidad' => 1,
+                'incluye_trago' => $venta['incluye_trago'],
+                'qr_codigo' => $qrCodigo,
+                'qr_hash' => $qrHash,
+                'qr_generado_at' => date('Y-m-d H:i:s'),
+                'estado' => 'comprada',
+                'entrada_precio' => $venta['entrada_precio'],
+                'entrada_nombre' => $venta['entrada_nombre'],
+                'evento_nombre' => $venta['evento_nombre'],
+                'evento_fecha' => $venta['evento_fecha'],
+            ];
+        }
+
+        $pdo->commit();
+
+        return $tickets;
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        throw $e;
+    }
+}
+
 try {
     $globalStart = microtime(true);
 
@@ -237,6 +498,8 @@ try {
                 v.promotor_id,
                 v.cantidad,
                 v.incluye_trago,
+                v.qr_codigo,
+                v.qr_generado_at,
                 e.nombre AS entrada_nombre,
                 v.precio_unitario AS entrada_precio,
                 ev.nombre AS evento_nombre
@@ -246,9 +509,8 @@ try {
             LEFT JOIN eventos ev
                 ON ev.id = v.evento_id
             WHERE v.estado = 'comprada'
-              AND v.qr_generado_at IS NULL
               AND LOWER(COALESCE(e.nombre, '')) = LOWER('anticipada')
-            ORDER BY v.fecha_venta ASC, v.id ASC
+            ORDER BY v.fecha_venta DESC, v.id DESC
         ");
         $anticipadas = $stmt->fetchAll() ?: [];
         logTime('GET anticipadas', $timer);
@@ -468,6 +730,8 @@ try {
                     v.promotor_id,
                     v.cantidad,
                     v.incluye_trago,
+                    v.qr_codigo,
+                    v.qr_generado_at,
                     e.nombre AS entrada_nombre,
                     v.precio_unitario AS entrada_precio,
                     ev.nombre AS evento_nombre
@@ -506,8 +770,33 @@ try {
         }
     }
 
-    if ($accion === 'imprimir') {
+    if ($accion === 'preparar' || $accion === 'imprimir' || $accion === 'descargar_qr') {
         $id = isset($input['id']) ? (int)$input['id'] : 0;
+
+        if ($id <= 0) {
+            jsonResponse(400, ['error' => 'Debe indicar el ID de la anticipada.']);
+        }
+
+        $timer = microtime(true);
+        $tickets = materializarAnticipadas($pdo, $id);
+        logTime('materializar anticipadas', $timer);
+
+        $printJobs = array_map('construirPrintJobDesdeVenta', $tickets);
+
+        logTime('TOTAL anticipadas.php', $globalStart);
+        jsonResponse(200, [
+            'success' => true,
+            'mensaje' => 'Anticipada preparada correctamente.',
+            'tickets' => $tickets,
+            'print_jobs' => $printJobs,
+        ]);
+    }
+    if ($accion === 'eliminar') {
+        $id = isset($input['id']) ? (int)$input['id'] : 0;
+        $usuarioId = isset($input['usuario_id']) && $input['usuario_id'] !== ''
+            ? (int)$input['usuario_id']
+            : null;
+        $motivo = trim((string)($input['motivo'] ?? 'Eliminación manual desde anticipadas'));
 
         if ($id <= 0) {
             jsonResponse(400, ['error' => 'Debe indicar el ID de la anticipada.']);
@@ -517,187 +806,96 @@ try {
         $stmt = $pdo->prepare("
             SELECT
                 v.id,
-                v.nombre,
-                v.dni,
-                v.entrada_id,
                 v.evento_id,
-                v.usuario_id,
+                v.entrada_id,
                 v.promotor_id,
+                v.estado,
                 v.cantidad,
-                v.incluye_trago,
-                v.qr_codigo,
-                v.precio_unitario AS entrada_precio,
-                e.nombre AS entrada_nombre,
-                ev.nombre AS evento_nombre,
-                ev.fecha AS evento_fecha
+                e.nombre AS entrada_nombre
             FROM ventas_entradas v
             LEFT JOIN entradas e
                 ON e.id = v.entrada_id
-            LEFT JOIN eventos ev
-                ON ev.id = v.evento_id
             WHERE v.id = :id
-              AND v.estado = 'comprada'
+              AND LOWER(COALESCE(e.nombre, '')) = LOWER('anticipada')
             LIMIT 1
         ");
         $stmt->execute([':id' => $id]);
-        $anticipada = $stmt->fetch();
-        logTime('imprimir obtener anticipada', $timer);
+        $venta = $stmt->fetch();
+        logTime('eliminar obtener anticipada', $timer);
 
-        if ($anticipada === false) {
-            jsonResponse(404, ['error' => 'No se encontró la entrada anticipada.']);
+        if ($venta === false) {
+            jsonResponse(404, ['error' => 'No se encontró la anticipada.']);
         }
 
-        $nombreEntrada = trim((string)($anticipada['entrada_nombre'] ?? 'Anticipada'));
-        $precio = isset($anticipada['entrada_precio']) ? (float)$anticipada['entrada_precio'] : 0.0;
-        $cantidad = max(1, (int)($anticipada['cantidad'] ?? 1));
-        $incluyeTrago = filter_var(
-            $anticipada['incluye_trago'] ?? false,
-            FILTER_VALIDATE_BOOLEAN,
-            FILTER_NULL_ON_FAILURE
-        ) ?? false;
-        $eventoId = isset($anticipada['evento_id']) ? (int)$anticipada['evento_id'] : null;
-        $entradaId = isset($anticipada['entrada_id']) ? (int)$anticipada['entrada_id'] : null;
-        $usuarioId = isset($anticipada['usuario_id']) ? (int)$anticipada['usuario_id'] : null;
-        $eventoFecha = formatearFechaEvento($anticipada['evento_fecha'] ?? null);
+        $estado = strtolower((string)($venta['estado'] ?? ''));
 
-        $timer = microtime(true);
-        $printJobs = [];
-        $ticketIds = [];
-        $qrCodigos = [];
+        if ($estado !== 'comprada') {
+            jsonResponse(409, ['error' => 'Solo se pueden eliminar anticipadas en estado comprada.']);
+        }
 
         $pdo->beginTransaction();
+
         try {
-            $insertCopiaStmt = $pdo->prepare("
-                INSERT INTO ventas_entradas (
-                    entrada_id,
-                    cantidad,
-                    precio_unitario,
-                    evento_id,
-                    incluye_trago,
-                    usuario_id,
-                    estado,
-                    nombre,
-                    dni,
-                    promotor_id,
-                    qr_codigo,
-                    qr_hash,
-                    qr_generado_at
-                )
-                VALUES (
-                    :entrada_id,
-                    1,
-                    :precio_unitario,
-                    :evento_id,
-                    :incluye_trago,
-                    :usuario_id,
-                    'comprada',
-                    :nombre,
-                    :dni,
-                    :promotor_id,
-                    :qr_codigo,
-                    :qr_hash,
-                    NOW()
-                )
-                RETURNING id
-            ");
-            $updateOriginalStmt = $pdo->prepare("
+            $observacion = $usuarioId !== null && $usuarioId > 0
+                ? $motivo . ' | user=' . $usuarioId
+                : $motivo;
+
+            $timer = microtime(true);
+            $updateStmt = $pdo->prepare("
                 UPDATE ventas_entradas
                 SET
-                    cantidad = 1,
-                    qr_codigo = :qr_codigo,
-                    qr_hash = :qr_hash,
-                    qr_generado_at = NOW()
+                    estado = 'anulada',
+                    observaciones = CASE
+                        WHEN COALESCE(observaciones, '') = ''
+                            THEN :observacion
+                        ELSE observaciones || ' | ' || :observacion
+                    END
                 WHERE id = :id
             ");
+            $updateStmt->execute([
+                ':id' => $id,
+                ':observacion' => $observacion,
+            ]);
+            logTime('eliminar update anticipada', $timer);
 
-            for ($i = 0; $i < $cantidad; $i++) {
-                $qrCodigo = generarQrUnico($pdo);
-                $qrHash = generarQrHash($qrCodigo);
+            $promotorId = isset($venta['promotor_id']) ? (int)$venta['promotor_id'] : 0;
+            $eventoId = isset($venta['evento_id']) ? (int)$venta['evento_id'] : 0;
+            $entradaId = isset($venta['entrada_id']) ? (int)$venta['entrada_id'] : 0;
+            $cantidad = max(1, (int)($venta['cantidad'] ?? 1));
 
-                if ($i === 0) {
-                    $updateOriginalStmt->execute([
-                        ':id' => $id,
-                        ':qr_codigo' => $qrCodigo,
-                        ':qr_hash' => $qrHash,
-                    ]);
-                    $ticketIds[] = (int)$anticipada['id'];
-                    $qrCodigos[] = $qrCodigo;
-                    continue;
-                }
-
-                $insertCopiaStmt->bindValue(':entrada_id', $entradaId, PDO::PARAM_INT);
-                $insertCopiaStmt->bindValue(':precio_unitario', $precio);
-                $insertCopiaStmt->bindValue(':evento_id', $eventoId, $eventoId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
-                $insertCopiaStmt->bindValue(':incluye_trago', $incluyeTrago ? true : false, PDO::PARAM_BOOL);
-                $insertCopiaStmt->bindValue(':usuario_id', $usuarioId, $usuarioId !== null ? PDO::PARAM_INT : PDO::PARAM_NULL);
-                $insertCopiaStmt->bindValue(':nombre', (string)($anticipada['nombre'] ?? ''), PDO::PARAM_STR);
-                $insertCopiaStmt->bindValue(
-                    ':dni',
-                    (($anticipada['dni'] ?? null) !== null && trim((string)$anticipada['dni']) !== '')
-                        ? (string)$anticipada['dni']
-                        : null,
-                    (($anticipada['dni'] ?? null) !== null && trim((string)$anticipada['dni']) !== '')
-                        ? PDO::PARAM_STR
-                        : PDO::PARAM_NULL
-                );
-                $insertCopiaStmt->bindValue(
-                    ':promotor_id',
-                    ($anticipada['promotor_id'] ?? null) !== null
-                        ? (int)$anticipada['promotor_id']
-                        : null,
-                    ($anticipada['promotor_id'] ?? null) !== null
-                        ? PDO::PARAM_INT
-                        : PDO::PARAM_NULL
-                );
-                $insertCopiaStmt->bindValue(':qr_codigo', $qrCodigo, PDO::PARAM_STR);
-                $insertCopiaStmt->bindValue(':qr_hash', $qrHash, PDO::PARAM_STR);
-
-                $insertCopiaStmt->execute();
-                $ticketIds[] = (int)$insertCopiaStmt->fetchColumn();
-                $qrCodigos[] = $qrCodigo;
+            if ($promotorId > 0 && $eventoId > 0 && $entradaId > 0) {
+                $timer = microtime(true);
+                $cupoStmt = $pdo->prepare("
+                    UPDATE promotores_cupos
+                    SET cupo_vendido = GREATEST(cupo_vendido - :cantidad, 0)
+                    WHERE usuario_id = :usuario_id
+                      AND evento_id = :evento_id
+                      AND entrada_id = :entrada_id
+                ");
+                $cupoStmt->execute([
+                    ':cantidad' => $cantidad,
+                    ':usuario_id' => $promotorId,
+                    ':evento_id' => $eventoId,
+                    ':entrada_id' => $entradaId,
+                ]);
+                logTime('eliminar update cupo promotor', $timer);
             }
 
             $pdo->commit();
+
+            logTime('TOTAL anticipadas.php', $globalStart);
+            jsonResponse(200, [
+                'success' => true,
+                'mensaje' => 'Anticipada eliminada correctamente.',
+                'id_eliminado' => $id,
+            ]);
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
             }
+
             throw $e;
         }
-        logTime('imprimir generar qr por entrada', $timer);
-
-        for ($i = 0; $i < $cantidad; $i++) {
-            $printJobs[] = [
-                'ticket_id' => $ticketIds[$i] ?? (int)$anticipada['id'],
-                'evento_id' => $eventoId,
-                'entrada_id' => $entradaId,
-                'usuario_id' => $usuarioId,
-                'tipo' => $nombreEntrada,
-                'precio' => (int)round($precio),
-                'precio_formateado' => number_format($precio, 0, ',', '.'),
-                'incluye_trago' => $incluyeTrago,
-                'trago_texto' => obtenerTextoTrago($incluyeTrago),
-                'qr' => $qrCodigos[$i] ?? '',
-                'estado' => 'comprada',
-                'fecha' => date('d/m/Y'),
-                'hora' => date('H:i'),
-                'negocio' => 'SANTAS',
-                'ancho_papel' => '80mm',
-                'evento_fecha' => $eventoFecha,
-                'es_cortesia' => false,
-                'lista' => '',
-            ];
-        }
-        logTime('imprimir armar print_jobs', $timer);
-
-        logTime('TOTAL anticipadas.php', $globalStart);
-        jsonResponse(200, [
-            'success' => true,
-            'mensaje' => 'Ticket preparado para impresión.',
-            'id_eliminado' => $id,
-            'entrada' => $nombreEntrada,
-            'print_jobs' => $printJobs,
-        ]);
     }
 
     jsonResponse(400, ['error' => 'Acción no soportada.']);

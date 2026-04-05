@@ -14,7 +14,14 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "@/hooks/use-toast";
 import { api } from "@/services/api";
-import { Loader2, Printer, Search, Trash2, UserRoundPlus } from "lucide-react";
+import {
+  Download,
+  Loader2,
+  Printer,
+  Search,
+  Trash2,
+  UserRoundPlus,
+} from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -41,6 +48,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import QRCode from "qrcode";
 
 interface AnticipadaResponse {
   id: number;
@@ -54,6 +62,8 @@ interface AnticipadaResponse {
   entrada_nombre?: string | null;
   entrada_precio?: number | null;
   evento_nombre?: string | null;
+  qr_codigo?: string | null;
+  qr_generado_at?: string | null;
 }
 
 interface AnticipadaItem {
@@ -64,6 +74,8 @@ interface AnticipadaItem {
   cantidad: number;
   incluyeTrago: boolean;
   eventoNombre: string;
+  qrCodigo: string;
+  qrGenerado: boolean;
 }
 
 interface EntradaOption {
@@ -105,7 +117,38 @@ interface AnticipadasOptionsResponse {
   promotores?: PromotorOptionResponse[];
 }
 
-const normalizeEntradaName = (name: string) =>
+interface PrintJob {
+  ticket_id: number;
+  evento_id: number | null;
+  entrada_id: number | null;
+  usuario_id: number | null;
+  tipo: string;
+  precio: number;
+  precio_formateado: string;
+  incluye_trago: boolean;
+  trago_texto: string;
+  qr: string;
+  estado: string;
+  fecha: string;
+  hora: string;
+  negocio: string;
+  ancho_papel: string;
+  evento_fecha?: string;
+  es_cortesia?: boolean;
+  lista?: string;
+  nombre?: string;
+  dni?: string;
+}
+
+interface PrepararAnticipadaResponse {
+  success?: boolean;
+  mensaje?: string;
+  tickets?: AnticipadaResponse[];
+  print_jobs?: PrintJob[];
+  anticipada?: AnticipadaResponse;
+}
+
+const normalizeEntradaName = (name: string): string =>
   name
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -119,6 +162,8 @@ const mapAnticipada = (item: AnticipadaResponse): AnticipadaItem => ({
   cantidad: Number(item.cantidad ?? 1),
   incluyeTrago: Boolean(item.incluye_trago),
   eventoNombre: item.evento_nombre ?? "—",
+  qrCodigo: item.qr_codigo ?? "",
+  qrGenerado: Boolean(item.qr_codigo),
 });
 
 const getLoggedUserId = (): number | null => {
@@ -192,6 +237,7 @@ export default function Anticipadas(): JSX.Element {
   const [formOpen, setFormOpen] = useState<boolean>(false);
   const [creating, setCreating] = useState<boolean>(false);
   const [printingId, setPrintingId] = useState<number | null>(null);
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AnticipadaItem | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState<boolean>(false);
@@ -352,37 +398,357 @@ export default function Anticipadas(): JSX.Element {
     );
   }, [anticipadas, search]);
 
+  const downloadDataUrl = (dataUrl: string, fileName: string): void => {
+    const link = document.createElement("a");
+    link.href = dataUrl;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const loadImage = (src: string): Promise<HTMLImageElement> =>
+    new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () =>
+        reject(new Error("No se pudo cargar la imagen del QR."));
+      image.src = src;
+    });
+
+  const buildQrSheetDataUrl = async (tickets: PrintJob[]): Promise<string> => {
+    const validTickets = tickets.filter((ticket) => ticket.qr?.trim());
+
+    if (validTickets.length === 0) {
+      throw new Error("No hay QRs válidos para descargar.");
+    }
+
+    const paperWidth = 700;
+    const marginX = 28;
+    const topPadding = 26;
+    const bottomPadding = 26;
+    const qrSize = 250;
+    const separatorGap = 24;
+
+    const lineHeights = {
+      titulo: 44,
+      gigante: 54,
+      destacado: 38,
+      normal: 30,
+      small: 24,
+      empty: 18,
+    };
+
+    const measureTicketHeight = (ticket: PrintJob): number => {
+      let height = topPadding;
+
+      height += 20; // línea superior
+      height += 18;
+
+      height += lineHeights.titulo;
+      height += lineHeights.empty;
+
+      if (ticket.tipo?.trim()) {
+        height += lineHeights.gigante;
+      }
+
+      if (ticket.es_cortesia) {
+        height += lineHeights.destacado;
+      } else if (ticket.precio_formateado?.trim()) {
+        height += lineHeights.destacado;
+      }
+
+      if (ticket.evento_fecha?.trim()) {
+        height += lineHeights.normal;
+      } else if (ticket.fecha?.trim() || ticket.hora?.trim()) {
+        height += lineHeights.normal;
+      }
+
+      if (ticket.lista?.trim()) {
+        height += lineHeights.normal;
+      }
+
+      if (ticket.trago_texto?.trim()) {
+        height += lineHeights.normal;
+      }
+
+      if (ticket.nombre?.trim()) {
+        height += lineHeights.normal;
+      }
+
+      if (ticket.dni?.trim()) {
+        height += lineHeights.normal;
+      }
+
+      height += lineHeights.empty;
+      height += lineHeights.destacado;
+
+      height += 18;
+      height += 20; // línea antes del QR
+      height += 18;
+
+      height += qrSize;
+      height += bottomPadding;
+
+      return height;
+    };
+
+    const ticketHeights = validTickets.map(measureTicketHeight);
+    const totalHeight =
+      ticketHeights.reduce((acc, h) => acc + h, 0) +
+      separatorGap * (validTickets.length - 1);
+
+    const canvas = document.createElement("canvas");
+    canvas.width = paperWidth;
+    canvas.height = totalHeight;
+
+    const ctx = canvas.getContext("2d");
+
+    if (!ctx) {
+      throw new Error("No se pudo crear la imagen de descarga.");
+    }
+
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.textBaseline = "top";
+    ctx.imageSmoothingEnabled = true;
+
+    const drawText = (
+      text: string,
+      y: number,
+      options: {
+        font: string;
+        align?: CanvasTextAlign;
+        x?: number;
+      },
+    ): void => {
+      ctx.font = options.font;
+      ctx.fillStyle = "#000000";
+      ctx.textAlign = options.align ?? "left";
+
+      const x =
+        options.x ??
+        (options.align === "center"
+          ? paperWidth / 2
+          : options.align === "right"
+            ? paperWidth - marginX
+            : marginX);
+
+      ctx.fillText(text, x, y);
+    };
+
+    let currentY = 0;
+
+    for (let index = 0; index < validTickets.length; index += 1) {
+      const ticket = validTickets[index];
+      const ticketTop = currentY;
+      const ticketHeight = ticketHeights[index];
+
+      ctx.strokeStyle = "#000000";
+      ctx.lineWidth = 2;
+
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, ticketTop, paperWidth, ticketHeight);
+
+      let y = ticketTop + topPadding;
+
+      ctx.beginPath();
+      ctx.moveTo(marginX, y);
+      ctx.lineTo(paperWidth - marginX, y);
+      ctx.stroke();
+
+      y += 18;
+
+      drawText("SANTAS", y, {
+        font: "bold 30px Arial",
+        align: "center",
+      });
+      y += lineHeights.titulo;
+
+      y += lineHeights.empty;
+
+      if (ticket.tipo?.trim()) {
+        drawText(ticket.tipo.toUpperCase(), y, {
+          font: "bold 38px Arial",
+          align: "center",
+        });
+        y += lineHeights.gigante;
+      }
+
+      if (ticket.es_cortesia) {
+        drawText("SIN CARGO", y, {
+          font: "bold 28px Arial",
+          align: "center",
+        });
+        y += lineHeights.destacado;
+      } else if (ticket.precio_formateado?.trim()) {
+        drawText(`$${ticket.precio_formateado}`, y, {
+          font: "bold 28px Arial",
+          align: "center",
+        });
+        y += lineHeights.destacado;
+      }
+
+      if (ticket.evento_fecha?.trim()) {
+        drawText(ticket.evento_fecha, y, {
+          font: "22px Arial",
+          align: "center",
+        });
+        y += lineHeights.normal;
+      } else if (ticket.fecha?.trim() || ticket.hora?.trim()) {
+        drawText(`${ticket.fecha ?? ""} ${ticket.hora ?? ""}`.trim(), y, {
+          font: "22px Arial",
+          align: "center",
+        });
+        y += lineHeights.normal;
+      }
+
+      if (ticket.lista?.trim()) {
+        drawText(`Lista: ${ticket.lista}`, y, {
+          font: "22px Arial",
+          align: "left",
+        });
+        y += lineHeights.normal;
+      }
+
+      if (ticket.trago_texto?.trim()) {
+        drawText(ticket.trago_texto, y, {
+          font: "22px Arial",
+          align: "center",
+        });
+        y += lineHeights.normal;
+      }
+
+      if (ticket.nombre?.trim()) {
+        drawText(ticket.nombre, y, {
+          font: "22px Arial",
+          align: "center",
+        });
+        y += lineHeights.normal;
+      }
+
+      if (ticket.dni?.trim()) {
+        drawText(`DNI ${ticket.dni}`, y, {
+          font: "22px Arial",
+          align: "center",
+        });
+        y += lineHeights.normal;
+      }
+
+      y += lineHeights.empty;
+
+      drawText("PRESENTAR QR EN INGRESO", y, {
+        font: "bold 24px Arial",
+        align: "center",
+      });
+      y += lineHeights.destacado;
+
+      y += 10;
+
+      ctx.beginPath();
+      ctx.moveTo(marginX, y);
+      ctx.lineTo(paperWidth - marginX, y);
+      ctx.stroke();
+
+      y += 18;
+
+      const qrDataUrl = await QRCode.toDataURL(ticket.qr.trim(), {
+        width: qrSize,
+        margin: 1,
+        color: {
+          dark: "#000000",
+          light: "#FFFFFF",
+        },
+      });
+
+      const qrImage = await loadImage(qrDataUrl);
+      const qrX = Math.round((paperWidth - qrSize) / 2);
+
+      ctx.drawImage(qrImage, qrX, y, qrSize, qrSize);
+
+      currentY += ticketHeight + separatorGap;
+    }
+
+    return canvas.toDataURL("image/png");
+  };
+
+  const handleDownloadQr = async (itemId: number): Promise<void> => {
+    setDownloadingId(itemId);
+
+    try {
+      const { data } = await api.post<PrepararAnticipadaResponse>(
+        "/anticipadas",
+        {
+          accion: "descargar_qr",
+          id: itemId,
+        },
+      );
+
+      const printJobs = Array.isArray(data?.print_jobs) ? data.print_jobs : [];
+      const validTickets = printJobs.filter((ticket) => ticket.qr?.trim());
+
+      if (validTickets.length === 0) {
+        throw new Error("No se pudo preparar la descarga de los QRs.");
+      }
+
+      const nombreBase =
+        (validTickets[0]?.nombre || "anticipadas")
+          .toLowerCase()
+          .replace(/\s+/g, "-")
+          .replace(/[^a-z0-9-_]/gi, "") || "anticipadas";
+
+      const sheetDataUrl = await buildQrSheetDataUrl(validTickets);
+
+      const now = new Date();
+
+      const fecha = now.toLocaleDateString("es-AR").replace(/\//g, "-"); // 05-04-2026
+      const hora = now.toTimeString().slice(0, 5).replace(":", "-"); // 14-32
+
+      downloadDataUrl(
+        sheetDataUrl,
+        `${nombreBase}-${fecha}_${hora}-entrada-${validTickets.length}.png`,
+      );
+
+      await fetchAnticipadas();
+
+      toast({
+        title: "Descarga generada",
+        description:
+          validTickets.length === 1
+            ? "Se descargó 1 QR."
+            : `Se descargaron ${validTickets.length} QRs distintos y quedaron disponibles en la lista.`,
+      });
+    } catch (error) {
+      console.error("Error al descargar QR:", error);
+
+      const axiosError = error as {
+        message?: string;
+        response?: {
+          data?: {
+            error?: string;
+            detalle?: string;
+          };
+        };
+      };
+
+      const message =
+        axiosError.response?.data?.detalle ||
+        axiosError.response?.data?.error ||
+        axiosError.message ||
+        "Reintentá en unos segundos.";
+
+      toast({
+        title: "No se pudo descargar",
+        description: message,
+        variant: "destructive",
+      });
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
   const handlePrint = async (itemId: number): Promise<void> => {
     setPrintingId(itemId);
-
-    interface PrintJob {
-      ticket_id: number;
-      evento_id: number | null;
-      entrada_id: number | null;
-      usuario_id: number | null;
-      tipo: string;
-      precio: number;
-      precio_formateado: string;
-      incluye_trago: boolean;
-      trago_texto: string;
-      qr: string;
-      estado: string;
-      fecha: string;
-      hora: string;
-      negocio: string;
-      ancho_papel: string;
-      evento_fecha?: string;
-      es_cortesia?: boolean;
-      lista?: string;
-    }
-
-    interface ImprimirAnticipadaResponse {
-      success?: boolean;
-      mensaje?: string;
-      id_eliminado?: number;
-      entrada?: string;
-      print_jobs?: PrintJob[];
-    }
 
     interface PrinterResponse {
       ok?: boolean;
@@ -391,7 +757,7 @@ export default function Anticipadas(): JSX.Element {
     }
 
     try {
-      const { data } = await api.post<ImprimirAnticipadaResponse>(
+      const { data } = await api.post<PrepararAnticipadaResponse>(
         "/anticipadas",
         {
           accion: "imprimir",
@@ -426,7 +792,7 @@ export default function Anticipadas(): JSX.Element {
         );
       }
 
-      setAnticipadas((prev) => prev.filter((item) => item.id !== itemId));
+      await fetchAnticipadas();
 
       toast({
         title: "Ticket impreso",
@@ -506,25 +872,28 @@ export default function Anticipadas(): JSX.Element {
     setCreating(true);
 
     try {
-      const { data } = await api.post("/anticipadas", {
-        accion: "crear",
-        nombre: formData.nombre.trim(),
-        dni: formData.dni.trim(),
-        evento_id: formData.eventoId ? Number(formData.eventoId) : null,
-        promotor_id: Number(formData.promotorId),
-        usuario_id: usuarioId,
-        cantidad: formData.cantidad,
-        incluye_trago: formData.incluyeTrago,
-      });
+      const { data } = await api.post<PrepararAnticipadaResponse>(
+        "/anticipadas",
+        {
+          accion: "crear",
+          nombre: formData.nombre.trim(),
+          dni: formData.dni.trim(),
+          evento_id: formData.eventoId ? Number(formData.eventoId) : null,
+          promotor_id: Number(formData.promotorId),
+          usuario_id: usuarioId,
+          cantidad: formData.cantidad,
+          incluye_trago: formData.incluyeTrago,
+        },
+      );
 
-      const nueva = data?.anticipada as AnticipadaResponse | undefined;
+      const nueva = data?.anticipada;
 
       if (nueva) {
         setAnticipadas((prev) => [mapAnticipada(nueva), ...prev]);
 
         toast({
           title: "Anticipada registrada",
-          description: (data?.mensaje as string) ?? "Se agregó al listado.",
+          description: data?.mensaje ?? "Se agregó al listado.",
         });
 
         resetForm();
@@ -550,12 +919,14 @@ export default function Anticipadas(): JSX.Element {
   const handleDelete = async (): Promise<void> => {
     if (!deleteTarget) return;
 
+    const usuarioId = getLoggedUserId();
     setDeletingId(deleteTarget.id);
 
     try {
       await api.post("/anticipadas", {
         accion: "eliminar",
         id: deleteTarget.id,
+        usuario_id: usuarioId,
       });
 
       setAnticipadas((prev) =>
@@ -571,9 +942,26 @@ export default function Anticipadas(): JSX.Element {
       setDeleteTarget(null);
     } catch (error) {
       console.error("Error al eliminar anticipada:", error);
+
+      const axiosError = error as {
+        message?: string;
+        response?: {
+          data?: {
+            error?: string;
+            detalle?: string;
+          };
+        };
+      };
+
+      const message =
+        axiosError.response?.data?.detalle ||
+        axiosError.response?.data?.error ||
+        axiosError.message ||
+        "Reintentá en unos segundos.";
+
       toast({
         title: "No se pudo eliminar",
-        description: "Reintentá en unos segundos.",
+        description: message,
         variant: "destructive",
       });
     } finally {
@@ -591,7 +979,7 @@ export default function Anticipadas(): JSX.Element {
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-4xl font-bold text-foreground mb-2">
+          <h1 className="mb-2 text-4xl font-bold text-foreground">
             Anticipadas
           </h1>
           <p className="text-muted-foreground">
@@ -668,7 +1056,7 @@ export default function Anticipadas(): JSX.Element {
                         </p>
 
                         {entradaPrice !== null && (
-                          <div className="text-xs text-muted-foreground space-y-1">
+                          <div className="space-y-1 text-xs text-muted-foreground">
                             <p>Precio actual: ${entradaPrice}</p>
                             {totalPrice !== null && (
                               <p>
@@ -782,7 +1170,7 @@ export default function Anticipadas(): JSX.Element {
                 </div>
               </div>
 
-              <div className="flex items-center justify-between gap-3 border border-border rounded-lg px-4 py-3">
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-4 py-3">
                 <div>
                   <p className="font-medium">Incluye trago</p>
                   <p className="text-sm text-muted-foreground">
@@ -798,7 +1186,7 @@ export default function Anticipadas(): JSX.Element {
                 />
               </div>
 
-              <div className="flex gap-3 flex-col md:flex-row md:justify-end">
+              <div className="flex flex-col gap-3 md:flex-row md:justify-end">
                 <Button
                   className="w-full md:w-auto"
                   onClick={handleCreate}
@@ -840,12 +1228,12 @@ export default function Anticipadas(): JSX.Element {
 
         <CardContent>
           {loading ? (
-            <div className="flex items-center text-muted-foreground text-sm py-10">
-              <Loader2 className="h-4 w-4 animate-spin mr-2" /> Cargando
-              anticipadas...
+            <div className="flex items-center py-10 text-sm text-muted-foreground">
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Cargando anticipadas...
             </div>
           ) : filteredAnticipadas.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-6">
+            <p className="py-6 text-sm text-muted-foreground">
               No hay anticipadas para mostrar.
             </p>
           ) : (
@@ -897,11 +1285,28 @@ export default function Anticipadas(): JSX.Element {
                         <div className="flex justify-end gap-2">
                           <Button
                             size="sm"
+                            variant="outline"
+                            disabled={downloadingId === item.id}
+                            onClick={() => {
+                              void handleDownloadQr(item.id);
+                            }}
+                            title="Descargar QR"
+                          >
+                            {downloadingId === item.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Download className="h-4 w-4" />
+                            )}
+                          </Button>
+
+                          <Button
+                            size="sm"
                             variant="secondary"
                             disabled={printingId === item.id}
                             onClick={() => {
                               void handlePrint(item.id);
                             }}
+                            title="Imprimir"
                           >
                             {printingId === item.id ? (
                               <Loader2 className="h-4 w-4 animate-spin" />
@@ -918,6 +1323,7 @@ export default function Anticipadas(): JSX.Element {
                               setDeleteTarget(item);
                               setDeleteDialogOpen(true);
                             }}
+                            title="Eliminar"
                           >
                             {deletingId === item.id ? (
                               <Loader2 className="h-4 w-4 animate-spin" />
